@@ -27,7 +27,7 @@
 | 多空辩论 | Bull 与 Bear Researcher 进行多轮论证，由 Research Manager 汇总 |
 | 风险评审 | 激进、中性、保守三类风险角色审查交易计划 |
 | 中国市场适配 | 支持 `.SS`、`.SZ`、`.HK` 及常见中国 ADR |
-| 中文数据源 | 东方财富、雪球/股吧、巨潮资讯及中文宏观新闻 |
+| 中文数据源 | 东方财富、雪球、NGA 大时代、巨潮资讯及中文宏观新闻 |
 | 行情事实校验 | 对标的身份、OHLCV、指标日期和数据窗口进行验证 |
 | 股票长期记忆 | 保存每只股票的历史报告、最终决策和事后反思 |
 | 增量分析 | 默认复用 30 天内的基本面，刷新行情、新闻和情绪 |
@@ -142,7 +142,7 @@ flowchart TD
     TICKER["输入股票代码"] --> REGION{"市场识别"}
     REGION -->|美股及其他市场| GLOBAL["Yahoo Finance<br/>StockTwits / Reddit<br/>英文新闻"]
     REGION -->|A 股 / 港股 / 中国 ADR| CDP{"Chrome CDP 是否可用"}
-    CDP -->|是| BROWSER["真实 Chrome<br/>东方财富 / 雪球 / 股吧"]
+    CDP -->|是| BROWSER["真实 Chrome<br/>东方财富 / 雪球 / NGA 大时代"]
     CDP -->|否| START["自动启动 Chrome<br/>Windows / Ubuntu / macOS"]
     START --> READY{"15 秒内就绪"}
     READY -->|是| BROWSER
@@ -161,7 +161,7 @@ flowchart TD
 | 行情与技术指标 | Yahoo Finance | Yahoo Finance + 验证快照 |
 | 公司新闻 | Yahoo Finance | Chrome/CDP，失败后东方财富 HTTP |
 | 宏观新闻 | 英文新闻与 FRED | 中文宏观新闻与国内数据源 |
-| 社区情绪 | StockTwits、Reddit | 雪球、股吧、同花顺、淘股吧 |
+| 社区情绪 | StockTwits、Reddit | 东方财富股吧、雪球、NGA 大时代 |
 | 官方公告 | 供应商数据 | 巨潮资讯 CNINFO |
 | 预测市场 | Polymarket | Polymarket，失败时降级 |
 
@@ -182,6 +182,11 @@ browser_data/chrome-profile/
 ```
 
 第一次启动后，可在该 Chrome 窗口登录需要 Cookie 的网站。Chrome 会保持运行，后续分析直接复用。该目录可能包含登录信息，已加入 `.gitignore`，请勿公开或提交。
+
+中文社区情绪默认同时启用东方财富、雪球和 NGA。NGA 数据来自“大时代”
+版块（`fid=706`），系统会用证券中文名称搜索个股主题，并在可识别时补充行业主题，
+再读取近期主题帖及回复。NGA 和雪球可能要求登录；可在 Web 设置页的“浏览器登录”
+区域打开对应网站并登录，登录状态会保存在上述专用 Chrome Profile 中。
 
 如果 Chrome 启动失败，系统不会终止分析，而是自动回退到 HTTP 数据源。
 
@@ -411,7 +416,8 @@ pytest -q tests/test_playwright_web.py
 
 ### 数据源诊断
 
-不运行智能体，仅检查 Chrome CDP、中文社区、东方财富新闻和 Polymarket：
+不运行智能体，仅检查 Chrome CDP、东方财富股吧、雪球、NGA 大时代、
+东方财富新闻和 Polymarket：
 
 ```bash
 python scripts/diagnose_data_sources.py --ticker 159516.SZ --platform macos
@@ -420,6 +426,31 @@ python scripts/diagnose_data_sources.py --ticker 159516.SZ --platform macos
 浏览器加载成功的原始 HTML 会保存到
 `logs/source_diagnostics/<timestamp>/`，便于检查页面结构和调整解析器。
 东方财富宏观关键词会同时测试浏览器与 HTTP 两条路径。
+
+只诊断 NGA（建议首次使用时先在专用 Chrome 中登录）：
+
+```bash
+python scripts/diagnose_data_sources.py \
+  --ticker 300308.SZ \
+  --platform macos \
+  --only-nga
+```
+
+如证券名称无法自动解析，或需要指定行业关键词：
+
+```bash
+python scripts/diagnose_data_sources.py \
+  --ticker 300308.SZ \
+  --platform macos \
+  --only-nga \
+  --nga-query 中际旭创 \
+  --nga-industry 光模块 \
+  --keep-nga-open
+```
+
+NGA 诊断结果会额外保存搜索页、抽样主题页和结构化回复到
+`logs/source_diagnostics/<timestamp>/`。`--keep-nga-open` 会保留相关标签页，
+方便人工核对搜索结果。
 
 只测试 HTTP 数据源：
 
@@ -439,7 +470,7 @@ python scripts/diagnose_data_sources.py --ticker 159516.SZ --json
 
 已经完成的主要改造：
 
-- 中国市场数据路由和中文社区数据源。
+- 中国市场数据路由，以及东方财富、雪球、NGA 大时代中文社区数据源。
 - 标的身份、行情窗口和关键价格校验。
 - 结构化模型输出和五级投资评级。
 - Web 实时工作台与历史报告。
