@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FxxKStock</title>
+  <link rel="icon" type="image/png" sizes="64x64" href="/static/favicon.png" />
+  <link rel="apple-touch-icon" href="/static/fxxkstock-icon.png" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
@@ -50,7 +52,7 @@
       align-items: center; gap: 10px; border-bottom: 1px solid var(--line-soft);
       font-size: 17px; font-weight: 720;
     }
-    .brand-mark { color: #76a8ff; }
+    .brand-mark { width: 22px; height: 22px; border-radius: 5px; }
     .brand-menu { margin-left: auto; border: 0; background: none; color: var(--muted); padding: 5px; }
     .side-controls { padding: 12px; border-bottom: 1px solid var(--line-soft); }
     .new-analysis {
@@ -314,7 +316,7 @@
 <body>
   <div class="app">
     <aside class="sidebar">
-      <div class="brand"><i data-lucide="chart-candlestick" class="icon brand-mark"></i>FxxKStock<button class="brand-menu" aria-label="Menu"><i data-lucide="menu" class="icon"></i></button></div>
+      <div class="brand"><img src="/static/fxxkstock-icon.png" class="brand-mark" alt="" />FxxKStock<button class="brand-menu" aria-label="Menu"><i data-lucide="menu" class="icon"></i></button></div>
       <div class="side-controls">
         <button class="new-analysis" id="newAnalysisBtn"><span>新建分析</span><i data-lucide="plus" class="icon"></i></button>
         <div class="search-wrap"><i data-lucide="search" class="icon"></i><input id="stockSearch" placeholder="搜索股票/ETF/指数" /></div>
