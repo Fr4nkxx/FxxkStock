@@ -438,8 +438,14 @@
       BUY: "买入", OVERWEIGHT: "增持", HOLD: "持有",
       UNDERWEIGHT: "减持", SELL: "卖出",
     };
+    const ACTIVE_RUNS_KEY = "fxxkstock.activeRuns";
+    const SELECTED_TICKER_KEY = "fxxkstock.selectedTicker";
     let historyItems = [];
     let stockGroups = [];
+    let activeRuns = (() => {
+      try { return JSON.parse(localStorage.getItem(ACTIVE_RUNS_KEY) || "{}"); }
+      catch { return {}; }
+    })();
     let selectedTicker = null;
     let selectedReportId = null;
     let selectedMode = "simple";
@@ -507,6 +513,28 @@
       });
       return [...map.values()];
     }
+    function saveActiveRuns() {
+      localStorage.setItem(ACTIVE_RUNS_KEY, JSON.stringify(activeRuns));
+    }
+    function mergeActiveRuns(groups) {
+      const merged = [...groups];
+      Object.values(activeRuns).forEach((run) => {
+        const ticker = (run.ticker || "").toUpperCase();
+        if (!ticker) return;
+        let group = merged.find((item) => item.ticker === ticker);
+        if (!group) {
+          group = {
+            ticker,
+            name: run.name || ticker,
+            latest: { title: ticker, created_at: run.startedAt, decision: null },
+            reports: [],
+          };
+          merged.unshift(group);
+        }
+        group.activeRun = run;
+      });
+      return merged;
+    }
     function renderStockList() {
       const query = $("stockSearch").value.trim().toLowerCase();
       const groups = stockGroups.filter((group) =>
@@ -514,7 +542,7 @@
       );
       $("stockList").innerHTML = groups.length ? groups.map((group) => `
         <button class="stock-item ${group.ticker === selectedTicker ? "active" : ""}" data-ticker="${escapeHtml(group.ticker)}">
-          <div class="stock-item-top"><span>${escapeHtml(group.ticker)}</span>${group.latest.decision ? `<span class="badge ${decisionTone(group.latest.decision)}">${escapeHtml(RATING_LABELS[group.latest.decision] || group.latest.decision)}</span>` : ""}<span class="stock-count">${group.reports.length}</span></div>
+          <div class="stock-item-top"><span>${escapeHtml(group.ticker)}</span>${group.activeRun ? '<span class="badge blue">分析中</span>' : group.latest.decision ? `<span class="badge ${decisionTone(group.latest.decision)}">${escapeHtml(RATING_LABELS[group.latest.decision] || group.latest.decision)}</span>` : ""}<span class="stock-count">${group.reports.length}</span></div>
           <div class="stock-item-bottom"><span title="${escapeHtml(group.name || group.ticker)}">${escapeHtml(group.name || group.ticker)}</span><span class="stock-date">${escapeHtml(formatDate(group.latest.created_at).slice(0, 10))}</span></div>
         </button>`).join("") : '<div class="empty-list">没有匹配的分析标的</div>';
       document.querySelectorAll(".stock-item").forEach((button) =>
@@ -525,7 +553,7 @@
       const response = await fetch("/api/reports/history?limit=500");
       if (!response.ok) return;
       historyItems = (await response.json()).reports || [];
-      stockGroups = groupHistory(historyItems);
+      stockGroups = mergeActiveRuns(groupHistory(historyItems));
       renderStockList();
       if (selectFirst && !selectedTicker && stockGroups.length) await selectStock(stockGroups[0].ticker);
     }
@@ -615,21 +643,31 @@
     }
     async function loadOverview(range = "1d") {
       if (!selectedTicker) return;
-      const response = await fetch(`/api/stocks/${encodeURIComponent(selectedTicker)}/overview?range=${range}`);
+      const ticker = selectedTicker;
+      const response = await fetch(`/api/stocks/${encodeURIComponent(ticker)}/overview?range=${range}`);
       if (!response.ok) return;
-      renderOverview(await response.json());
+      const overview = await response.json();
+      if (selectedTicker === ticker) renderOverview(overview);
     }
     async function selectStock(ticker) {
+      if (eventSource) { eventSource.close(); eventSource = null; }
       selectedTicker = ticker;
+      localStorage.setItem(SELECTED_TICKER_KEY, ticker);
       renderStockList();
       $("ticker").value = ticker;
       document.querySelectorAll(".range-btn").forEach((button) => button.classList.toggle("active", button.dataset.range === "1d"));
       const group = stockGroups.find((item) => item.ticker === ticker);
       $("instrumentName").textContent = `${ticker} · ${group?.name || ticker}`;
       $("instrumentMeta").textContent = "正在更新行情…";
-      const reportPromise = group?.reports.length ? loadReport(group.reports[0].id) : Promise.resolve(clearReport());
+      const activeRun = activeRuns[ticker];
+      const reportPromise = activeRun
+        ? Promise.resolve(clearReport())
+        : group?.reports.length
+          ? loadReport(group.reports[0].id)
+          : Promise.resolve(clearReport());
       const overviewPromise = loadOverview("1d");
       await Promise.allSettled([reportPromise, overviewPromise]);
+      if (activeRun) await restoreRun(activeRun);
     }
 
     function parseField(markdown, label) {
@@ -787,14 +825,124 @@
       if (value.includes("risk") || value.includes("portfolio") || value.includes("final")) return "risk_portfolio";
       return null;
     }
-    function startElapsedClock() {
+    function startElapsedClock(startedAt = Date.now()) {
       clearInterval(elapsedTimer);
-      runStartedAt = Date.now();
+      runStartedAt = Number(startedAt) || Date.now();
       elapsedTimer = setInterval(() => {
         const seconds = Math.floor((Date.now() - runStartedAt) / 1000);
         const elapsed = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
         $("analysisState").textContent = `分析中 · ${completedSections.size}/6 已完成 · 用时 ${elapsed}`;
       }, 1000);
+    }
+    async function completeRun(run) {
+      clearInterval(elapsedTimer);
+      delete activeRuns[run.ticker];
+      saveActiveRuns();
+      setProgress(100, "分析完成 · 6 个阶段");
+      eventSource?.close(); eventSource = null;
+      $("runBtn").disabled = false;
+      await loadHistory();
+      if (selectedTicker !== run.ticker) return;
+      await loadOverview("1d");
+      const reportResponse = await fetch(`/api/runs/${run.runId}/report`);
+      if (reportResponse.ok) {
+        currentReport = await reportResponse.json();
+        currentReport.created_at = new Date().toISOString();
+        updateDecisionPanel(currentReport);
+        renderReportTab("summary");
+      }
+    }
+    async function handleRunEvent(run, data) {
+      if (data.type === "heartbeat") return;
+      logEvent(data);
+      if (data.type === "report_section") {
+        const stage = progressStage(data.section || data.label);
+        if (stage) completedSections.add(stage);
+        setProgress(Math.min(92, 8 + completedSections.size / 6 * 84));
+      }
+      if (data.type === "memory_loaded") {
+        setProgress(7, data.has_memory ? "已加载股票记忆" : "首次完整分析");
+      }
+      if (data.type === "browser_status" && data.state === "failed_fallback") {
+        $("analysisState").textContent = "Chrome 不可用，已切换 HTTP 数据源";
+      }
+      if (data.type === "done") await completeRun(run);
+      if (data.type === "error") {
+        clearInterval(elapsedTimer);
+        delete activeRuns[run.ticker];
+        saveActiveRuns();
+        setProgress(0, `分析失败 · ${data.message || "未知错误"}`);
+        eventSource?.close(); eventSource = null;
+        $("runBtn").disabled = false;
+        await loadHistory();
+      }
+    }
+    function connectRunEvents(run) {
+      eventSource?.close();
+      currentRunId = run.runId;
+      eventSource = new EventSource(`/api/runs/${run.runId}/events`);
+      eventSource.onmessage = async (event) => {
+        let data; try { data = JSON.parse(event.data); } catch { return; }
+        await handleRunEvent(run, data);
+      };
+    }
+    async function restoreRun(run) {
+      const response = await fetch(`/api/runs/${encodeURIComponent(run.runId)}`);
+      if (!response.ok) {
+        delete activeRuns[run.ticker];
+        saveActiveRuns();
+        await loadHistory();
+        return;
+      }
+      const snapshot = await response.json();
+      if (snapshot.status === "done") {
+        await completeRun(run);
+        return;
+      }
+      if (snapshot.status === "error") {
+        await handleRunEvent(run, { type: "error", message: snapshot.error });
+        return;
+      }
+      completedSections = new Set(
+        (snapshot.completed_sections || []).map(progressStage).filter(Boolean)
+      );
+      const percent = Math.min(92, Math.max(2, 8 + completedSections.size / 6 * 84));
+      setProgress(percent, snapshot.status_message || "正在恢复分析进度…");
+      startElapsedClock(new Date(snapshot.started_at || run.startedAt).getTime());
+      $("runBtn").disabled = true;
+      connectRunEvents(run);
+    }
+    async function reconcileActiveRuns() {
+      const entries = Object.entries(activeRuns);
+      await Promise.all(entries.map(async ([ticker, run]) => {
+        try {
+          const response = await fetch(`/api/runs/${encodeURIComponent(run.runId)}`);
+          if (!response.ok) {
+            delete activeRuns[ticker];
+            return;
+          }
+          const snapshot = await response.json();
+          if (snapshot.status === "done" || snapshot.status === "error") {
+            delete activeRuns[ticker];
+          } else if (snapshot.started_at) {
+            run.startedAt = snapshot.started_at;
+          }
+        } catch {
+          // Keep the task metadata during a temporary server/network outage.
+        }
+      }));
+      saveActiveRuns();
+    }
+    async function initializePage() {
+      await Promise.all([loadModelsAndDefaults(), reconcileActiveRuns()]);
+      await loadHistory(false);
+      const savedTicker = localStorage.getItem(SELECTED_TICKER_KEY);
+      const active = Object.values(activeRuns)
+        .sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))[0];
+      const ticker = active?.ticker
+        || (savedTicker && stockGroups.some((group) => group.ticker === savedTicker) ? savedTicker : null)
+        || stockGroups[0]?.ticker;
+      if (ticker) await selectStock(ticker);
     }
     async function startRun() {
       const ticker = $("ticker").value.trim();
@@ -839,38 +987,20 @@
         clearInterval(elapsedTimer); setProgress(0, "启动失败"); $("runBtn").disabled = false; return;
       }
       currentRunId = (await response.json()).run_id;
-      eventSource?.close();
-      eventSource = new EventSource(`/api/runs/${currentRunId}/events`);
-      eventSource.onmessage = async (event) => {
-        let data; try { data = JSON.parse(event.data); } catch { return; }
-        if (data.type === "heartbeat") return;
-        logEvent(data);
-        if (data.type === "report_section") {
-          const stage = progressStage(data.section || data.label);
-          if (stage) completedSections.add(stage);
-          setProgress(Math.min(92, 8 + completedSections.size / 6 * 84));
-        }
-        if (data.type === "memory_loaded") setProgress(7, data.has_memory ? "已加载股票记忆" : "首次完整分析");
-        if (data.type === "browser_status" && data.state === "failed_fallback") $("analysisState").textContent = "Chrome 不可用，已切换 HTTP 数据源";
-        if (data.type === "done") {
-          clearInterval(elapsedTimer);
-          setProgress(100, "分析完成 · 6 个阶段");
-          eventSource.close(); eventSource = null; $("runBtn").disabled = false;
-          await loadHistory();
-          await loadOverview("1d");
-          const reportResponse = await fetch(`/api/runs/${currentRunId}/report`);
-          if (reportResponse.ok) {
-            currentReport = await reportResponse.json();
-            currentReport.created_at = new Date().toISOString();
-            updateDecisionPanel(currentReport);
-            renderReportTab("summary");
-          }
-        }
-        if (data.type === "error") {
-          clearInterval(elapsedTimer); setProgress(0, `分析失败 · ${data.message || "未知错误"}`);
-          eventSource.close(); eventSource = null; $("runBtn").disabled = false;
-        }
+      const run = {
+        runId: currentRunId,
+        ticker: selectedTicker,
+        startedAt: new Date().toISOString(),
       };
+      activeRuns[selectedTicker] = run;
+      saveActiveRuns();
+      stockGroups = mergeActiveRuns(groupHistory(historyItems));
+      renderStockList();
+      clearReport();
+      $("instrumentName").textContent = `${selectedTicker} · ${selectedTicker}`;
+      $("instrumentMeta").textContent = "正在获取基础信息…";
+      loadOverview("1d").catch((error) => logEvent({ type: "overview_error", message: error.message }));
+      connectRunEvents(run);
     }
     function exportReport() {
       if (!currentReport.markdown) return;
@@ -917,7 +1047,7 @@
     }));
     document.querySelectorAll(".report-tab").forEach((button) => button.addEventListener("click", () => renderReportTab(button.dataset.reportTab)));
     window.addEventListener("resize", () => { if (currentOverview) drawChart(currentOverview.chart || []); });
-    Promise.all([loadModelsAndDefaults(), loadHistory(true)]).catch((error) => logEvent({ type: "init_error", message: error.message }));
+    initializePage().catch((error) => logEvent({ type: "init_error", message: error.message }));
     icons();
   </script>
 </body>

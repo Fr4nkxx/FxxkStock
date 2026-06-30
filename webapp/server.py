@@ -226,10 +226,26 @@ def get_run_status(run_id: str) -> dict[str, Any]:
     state = RUNS.get(run_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    report_sections = [
+        event.get("section") or event.get("label", "")
+        for event in state.debug_events
+        if event.get("type") == "report_section"
+    ]
+    latest_status = next(
+        (
+            event.get("message")
+            for event in reversed(state.debug_events)
+            if event.get("type") == "status" and event.get("message")
+        ),
+        None,
+    )
     return {
         "run_id": run_id,
         "ticker": state.ticker,
+        "started_at": state.started_at,
         "status": state.status,
+        "completed_sections": report_sections,
+        "status_message": latest_status,
         "decision": state.decision,
         "report_available": state.status == "done" and state.report_path is not None,
         "error": state.error,

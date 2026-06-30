@@ -16,6 +16,7 @@ from fxxkstock.dataflows.eastmoney_browser import (
     get_browser_news,
 )
 from fxxkstock.dataflows.errors import NoMarketDataError
+from fxxkstock.dataflows.playwright_web import _detect_blocked_page
 
 
 _SAMPLE_NEWS_HTML = """
@@ -98,6 +99,15 @@ _CURRENT_XUEQIU_HTML = """
   </article>
 </body></html>
 """
+
+
+@pytest.mark.unit
+def test_block_detection_uses_visible_text_only():
+    normal_visible_text = "300308 中际旭创 讨论 高位放量，需要警惕追高风险。"
+
+    assert _detect_blocked_page(normal_visible_text) is None
+    assert _detect_blocked_page("请求过于频繁，稍后重试") == "rate_limit"
+    assert _detect_blocked_page("请完成安全验证 验证码") == "blocked"
 
 
 @pytest.mark.unit

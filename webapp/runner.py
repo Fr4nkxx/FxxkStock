@@ -76,6 +76,7 @@ class RunParams:
 class RunState:
     run_id: str
     ticker: str
+    started_at: str = field(default_factory=lambda: datetime.now().isoformat())
     status: str = "pending"
     event_queue: queue.Queue = field(default_factory=queue.Queue)
     thread: threading.Thread | None = None

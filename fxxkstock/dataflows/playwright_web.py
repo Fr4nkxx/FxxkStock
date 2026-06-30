@@ -52,6 +52,17 @@ def _classify_navigation_error(exc: Exception) -> Exception:
     return BrowserUnavailableError(str(exc))
 
 
+def _detect_blocked_page(visible_text: str) -> str | None:
+    """Classify only user-visible blocker text, not hidden templates/scripts."""
+    text = re.sub(r"\s+", " ", visible_text or "").strip()
+    lower = text.lower()
+    if re.search(r"(访问|请求)过于频繁|请稍后再试|too many requests", text, re.I):
+        return "rate_limit"
+    if re.search(r"验证码|安全验证|access denied|verify you are human", lower, re.I):
+        return "blocked"
+    return None
+
+
 def render_html(
     url: str,
     *,
@@ -86,6 +97,7 @@ def render_html(
             context = browser.contexts[0]
             page = context.new_page()
             html = ""
+            visible_text = ""
             try:
                 response = page.goto(url, wait_until=wait_until, timeout=timeout_ms)
                 if response is not None and response.status in (429, 503):
@@ -95,6 +107,7 @@ def render_html(
                 if wait_selector:
                     page.wait_for_selector(wait_selector, timeout=timeout_ms)
                 html = page.content()
+                visible_text = page.locator("body").inner_text(timeout=timeout_ms)
             finally:
                 page.close()
     except (BrowserUnavailableError, VendorRateLimitError):
@@ -107,10 +120,12 @@ def render_html(
     if not html or not html.strip():
         raise BrowserUnavailableError(f"empty HTML from {url}")
 
-    # 常见反爬/验证码页启发式检测
-    lower = html.lower()
-    if re.search(r"(验证码|访问过于频繁|请稍后再试|access denied)", html):
-        if "429" in lower or "频繁" in html:
+    # Hidden login/captcha modals and JavaScript error strings are present in
+    # normal vendor pages. Inspect rendered, visible body text to avoid treating
+    # those templates as an active blocker.
+    blocker = _detect_blocked_page(visible_text)
+    if blocker:
+        if blocker == "rate_limit":
             raise VendorRateLimitError(f"rate-limited page at {url}")
         raise BrowserUnavailableError(f"blocked or captcha page at {url}")
 
