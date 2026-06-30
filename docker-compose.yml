@@ -1,0 +1,36 @@
+services:
+  fxxkstock:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - fxxkstock_data:/home/appuser/.fxxkstock
+    tty: true
+    stdin_open: true
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    profiles:
+      - ollama
+
+  fxxkstock-ollama:
+    build: .
+    env_file:
+      - .env
+    environment:
+      - FXXKSTOCK_LLM_PROVIDER=ollama
+      - OLLAMA_BASE_URL=http://ollama:11434/v1
+    volumes:
+      - fxxkstock_data:/home/appuser/.fxxkstock
+    depends_on:
+      - ollama
+    tty: true
+    stdin_open: true
+    profiles:
+      - ollama
+
+volumes:
+  fxxkstock_data:
+  ollama_data:

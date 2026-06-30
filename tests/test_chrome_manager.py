@@ -1,0 +1,145 @@
+from __future__ import annotations
+
+import threading
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+from fxxkstock.dataflows.chrome_manager import ChromeManager
+import fxxkstock.dataflows.chrome_manager as chrome_manager_module
+
+
+def config(tmp_path: Path, platform: str = "ubuntu") -> dict:
+    executable = tmp_path / ("chrome.exe" if platform == "windows" else "chrome")
+    executable.write_text("", encoding="utf-8")
+    return {
+        "cn_browser_platform": platform,
+        "cn_browser_executable": str(executable),
+        "cn_browser_profile_dir": str(tmp_path / "profile"),
+        "cn_browser_cdp_url": "http://127.0.0.1:9222",
+        "cn_browser_startup_timeout_seconds": 0.01,
+    }
+
+
+def test_build_command_is_local_and_uses_project_profile(tmp_path):
+    manager = ChromeManager(config(tmp_path))
+    command = manager.build_command(manager.resolve_executable())
+
+    assert "--remote-debugging-address=127.0.0.1" in command
+    assert "--remote-debugging-port=9222" in command
+    assert f"--user-data-dir={(tmp_path / 'profile').resolve()}" in command
+
+
+def test_existing_cdp_does_not_spawn(tmp_path):
+    manager = ChromeManager(config(tmp_path))
+    with (
+        patch.object(manager, "is_cdp_available", return_value=True),
+        patch("fxxkstock.dataflows.chrome_manager.subprocess.Popen") as popen,
+    ):
+        result = manager.ensure_running()
+
+    assert result["state"] == "already_running"
+    popen.assert_not_called()
+
+
+def test_cdp_health_check_uses_direct_opener(tmp_path):
+    manager = ChromeManager(config(tmp_path))
+    response = MagicMock()
+    response.read.return_value = (
+        b'{"webSocketDebuggerUrl":"ws://127.0.0.1:9222/devtools/browser/test"}'
+    )
+    context = MagicMock()
+    context.__enter__.return_value = response
+    with patch(
+        "fxxkstock.dataflows.chrome_manager._DIRECT_OPENER.open",
+        return_value=context,
+    ) as direct_open:
+        assert manager.is_cdp_available()
+
+    direct_open.assert_called_once_with(
+        "http://127.0.0.1:9222/json/version",
+        timeout=0.75,
+    )
+
+
+def test_wrong_platform_falls_back_without_spawn(tmp_path):
+    manager = ChromeManager(config(tmp_path, platform="windows"))
+    with (
+        patch.object(manager, "is_cdp_available", return_value=False),
+        patch("fxxkstock.dataflows.chrome_manager.current_platform", return_value="macos"),
+        patch("fxxkstock.dataflows.chrome_manager.subprocess.Popen") as popen,
+    ):
+        result = manager.ensure_running()
+
+    assert result["state"] == "failed_fallback"
+    assert "does not match" in result["message"]
+    popen.assert_not_called()
+
+
+def test_successful_start_waits_for_cdp(tmp_path):
+    manager = ChromeManager(config(tmp_path, platform="macos"))
+    process = MagicMock()
+    process.poll.return_value = None
+    with (
+        patch("fxxkstock.dataflows.chrome_manager.current_platform", return_value="macos"),
+        patch.object(manager, "is_cdp_available", side_effect=[False, False, True, True]),
+        patch("fxxkstock.dataflows.chrome_manager.subprocess.Popen", return_value=process) as popen,
+    ):
+        result = manager.ensure_running()
+
+    assert result["state"] == "ready"
+    assert popen.call_args.args[0][0].endswith("chrome")
+    assert popen.call_args.kwargs["start_new_session"] is True
+    assert "127.0.0.1" in popen.call_args.kwargs["env"]["NO_PROXY"]
+
+
+def test_concurrent_calls_spawn_once(tmp_path):
+    manager = ChromeManager(config(tmp_path))
+    process = MagicMock()
+    process.poll.return_value = None
+    available = iter([False, False, True, True, True, True])
+    results = []
+
+    with (
+        patch("fxxkstock.dataflows.chrome_manager.current_platform", return_value="ubuntu"),
+        patch.object(manager, "is_cdp_available", side_effect=lambda *args, **kwargs: next(available, True)),
+        patch("fxxkstock.dataflows.chrome_manager.subprocess.Popen", return_value=process) as popen,
+    ):
+        threads = [threading.Thread(target=lambda: results.append(manager.ensure_running())) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    assert popen.call_count == 1
+    assert {result["state"] for result in results} <= {"ready", "already_running"}
+
+
+def test_status_includes_profile_and_lease_state(tmp_path):
+    manager = ChromeManager(config(tmp_path))
+    with patch.object(manager, "is_cdp_available", return_value=False):
+        status = manager.status()
+
+    assert status["profile_dir"] == str((tmp_path / "profile").resolve())
+    assert status["profile_exists"] is False
+    assert status["active_leases"] == 0
+    assert status["can_close"] is False
+
+
+def test_close_requests_graceful_browser_shutdown_first(tmp_path, monkeypatch):
+    manager = ChromeManager(config(tmp_path))
+    process = MagicMock()
+    process.poll.return_value = None
+    monkeypatch.setattr(chrome_manager_module, "_STARTED_PROCESS", process)
+    monkeypatch.setattr(chrome_manager_module, "_STARTED_PLATFORM", "ubuntu")
+    monkeypatch.setattr(chrome_manager_module, "_ACTIVE_LEASES", 1)
+
+    with (
+        patch.object(manager, "_request_graceful_close", return_value=True) as graceful,
+        patch.object(manager, "is_cdp_available", return_value=False),
+    ):
+        result = manager.close_managed()
+
+    graceful.assert_called_once()
+    process.terminate.assert_not_called()
+    process.kill.assert_not_called()
+    assert result["state"] == "closed"

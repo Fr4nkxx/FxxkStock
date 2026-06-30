@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FxxKStock</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <style>
+    :root {
+      --bg: #091019;
+      --surface: #0d1621;
+      --surface-2: #111d2a;
+      --surface-3: #172535;
+      --line: #253445;
+      --line-soft: #192736;
+      --text: #e7eef7;
+      --muted: #8799ad;
+      --faint: #5e7186;
+      --blue: #347cf6;
+      --blue-soft: rgba(52, 124, 246, .14);
+      --green: #65c466;
+      --red: #f06b64;
+      --amber: #eab941;
+      --sidebar: 286px;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: Inter, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
+      font-size: 13px; letter-spacing: 0; overflow: hidden;
+    }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    .icon { width: 16px; height: 16px; flex: 0 0 auto; }
+    .app {
+      width: 100%; height: 100dvh; min-height: 0; overflow: hidden;
+      display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr);
+    }
+
+    /* Sidebar */
+    .sidebar {
+      min-width: 0; min-height: 0; background: #0b141e;
+      border-right: 1px solid var(--line); display: flex; flex-direction: column;
+    }
+    .brand {
+      height: 58px; flex: 0 0 auto; padding: 0 16px; display: flex;
+      align-items: center; gap: 10px; border-bottom: 1px solid var(--line-soft);
+      font-size: 17px; font-weight: 720;
+    }
+    .brand-mark { color: #76a8ff; }
+    .brand-menu { margin-left: auto; border: 0; background: none; color: var(--muted); padding: 5px; }
+    .side-controls { padding: 12px; border-bottom: 1px solid var(--line-soft); }
+    .new-analysis {
+      width: 100%; height: 38px; border: 0; border-radius: 5px;
+      background: var(--blue); color: #fff; font-weight: 650;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .search-wrap { position: relative; margin-top: 10px; }
+    .search-wrap .icon { position: absolute; left: 10px; top: 9px; color: var(--faint); }
+    .search-wrap input {
+      width: 100%; height: 34px; padding: 0 10px 0 34px;
+      background: var(--surface); border: 1px solid var(--line); border-radius: 5px; outline: 0;
+    }
+    .search-wrap input:focus { border-color: var(--blue); }
+    .stock-group-label {
+      padding: 12px 14px 7px; color: var(--muted); font-size: 11px;
+      font-weight: 650; text-transform: uppercase;
+    }
+    .stock-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 7px 12px; }
+    .stock-item {
+      width: 100%; min-height: 61px; padding: 9px 10px; margin-bottom: 3px;
+      border: 1px solid transparent; border-radius: 5px; background: transparent; text-align: left;
+    }
+    .stock-item:hover { background: var(--surface-2); }
+    .stock-item.active { background: var(--blue-soft); border-color: rgba(52,124,246,.28); }
+    .stock-item-top, .stock-item-bottom { display: flex; align-items: center; gap: 8px; }
+    .stock-item-top { font-weight: 650; }
+    .stock-item-bottom { margin-top: 6px; color: var(--muted); font-size: 11px; }
+    .stock-count { margin-left: auto; }
+    .stock-date { margin-left: auto; }
+    .empty-list { padding: 18px 9px; color: var(--muted); line-height: 1.5; }
+    .badge {
+      display: inline-flex; align-items: center; min-height: 18px; padding: 1px 6px;
+      border-radius: 3px; border: 1px solid; font-size: 10px; font-weight: 750;
+    }
+    .badge.green { color: var(--green); background: rgba(101,196,102,.08); border-color: rgba(101,196,102,.3); }
+    .badge.red { color: var(--red); background: rgba(240,107,100,.08); border-color: rgba(240,107,100,.3); }
+    .badge.blue { color: #82afff; background: var(--blue-soft); border-color: rgba(52,124,246,.3); }
+    .badge.amber { color: var(--amber); background: rgba(234,185,65,.08); border-color: rgba(234,185,65,.3); }
+
+    /* Main shell */
+    .terminal { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+    .terminal-header {
+      height: 72px; flex: 0 0 auto; padding: 0 18px; display: flex; align-items: center;
+      gap: 14px; border-bottom: 1px solid var(--line); background: #0b131d;
+    }
+    .instrument-title { min-width: 0; margin-right: auto; }
+    .instrument-title h1 { margin: 0; font-size: 20px; line-height: 1.2; }
+    .instrument-title p { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+    .action-btn {
+      height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: 5px;
+      background: var(--surface-2); display: inline-flex; align-items: center; gap: 7px; font-weight: 620;
+    }
+    .action-btn.primary { border-color: var(--blue); background: var(--blue); color: #fff; }
+    .icon-btn {
+      width: 36px; height: 36px; display: grid; place-items: center;
+      border: 1px solid var(--line); border-radius: 5px; background: transparent;
+    }
+    .terminal-scroll {
+      flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+      scrollbar-gutter: stable; -webkit-overflow-scrolling: touch;
+    }
+
+    /* Market overview */
+    .market-overview { border-bottom: 1px solid var(--line); }
+    .market-grid {
+      min-height: 234px; display: grid;
+      grid-template-columns: 220px minmax(360px, 1fr) 390px;
+    }
+    .price-block { padding: 17px 18px; border-right: 1px solid var(--line); }
+    .eyebrow { color: var(--muted); font-size: 11px; }
+    .last-price { margin-top: 15px; font-size: 43px; line-height: 1; font-weight: 690; }
+    .price-change { margin-top: 15px; font-size: 18px; font-weight: 650; }
+    .positive { color: var(--green) !important; }
+    .negative { color: var(--red) !important; }
+    .market-status { margin-top: 38px; color: var(--muted); font-size: 11px; display: flex; align-items: center; gap: 7px; }
+    .market-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+    .chart-block { min-width: 0; padding: 9px 12px 8px; border-right: 1px solid var(--line); }
+    .range-tabs { height: 31px; display: flex; gap: 4px; }
+    .range-btn {
+      min-width: 48px; height: 28px; border: 0; border-radius: 4px;
+      background: transparent; color: var(--muted);
+    }
+    .range-btn.active { background: var(--blue-soft); color: #a8c6ff; }
+    .chart-wrap { position: relative; height: 178px; }
+    #priceChart { display: block; width: 100%; height: 100%; }
+    .chart-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+    .quote-grid { display: grid; grid-template-columns: 1fr 1fr; align-content: start; }
+    .quote-cell {
+      min-height: 38px; padding: 8px 12px; display: flex; justify-content: space-between; gap: 10px;
+      border-bottom: 1px solid var(--line-soft); border-right: 1px solid var(--line-soft);
+    }
+    .quote-cell:nth-child(2n) { border-right: 0; }
+    .quote-cell span { color: var(--muted); }
+    .quote-cell strong { font-weight: 560; text-align: right; }
+    .profile-strip {
+      min-height: 69px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+      border-top: 1px solid var(--line);
+    }
+    .profile-cell { padding: 12px 18px; min-width: 0; }
+    .profile-cell span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; }
+    .profile-cell strong { display: block; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+
+    /* Analysis progress */
+    .analysis-strip {
+      margin: 10px 10px 8px; min-height: 58px; padding: 0 16px;
+      display: grid; grid-template-columns: auto auto minmax(160px, 1fr) auto auto;
+      align-items: center; gap: 18px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface);
+    }
+    .analysis-strip h2 { margin: 0; font-size: 15px; }
+    .analysis-state { color: var(--muted); white-space: nowrap; font-size: 11px; }
+    .progress-track { height: 6px; overflow: hidden; background: #263544; border-radius: 3px; }
+    .progress-fill { width: 0; height: 100%; background: var(--blue); transition: width .25s ease; }
+    .progress-number { min-width: 42px; font-size: 17px; text-align: right; }
+    .debug-link { border: 0; background: none; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+
+    /* Report */
+    .report-shell {
+      margin: 0 10px 10px; min-height: 470px; border: 1px solid var(--line);
+      border-radius: 5px; background: var(--surface); overflow: hidden;
+    }
+    .report-toolbar {
+      height: 52px; padding: 0 14px; display: flex; align-items: center;
+      border-bottom: 1px solid var(--line);
+    }
+    .report-toolbar h2 { margin: 0 22px 0 0; font-size: 16px; }
+    .report-tabs { align-self: stretch; display: flex; gap: 5px; }
+    .report-tab {
+      height: 52px; padding: 0 13px; border: 0; border-bottom: 2px solid transparent;
+      background: none; color: var(--muted); font-weight: 600;
+    }
+    .report-tab.active { color: #73a5ff; border-color: var(--blue); }
+    .report-actions { margin-left: auto; display: flex; gap: 7px; }
+    .small-btn {
+      height: 31px; padding: 0 10px; border: 1px solid var(--line); border-radius: 4px;
+      background: transparent; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .report-body { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 416px; }
+    .decision-panel { padding: 18px; border-right: 1px solid var(--line); background: #0c151f; }
+    .decision-rating { font-size: 28px; font-weight: 720; text-transform: uppercase; }
+    .decision-stats { margin: 17px 0; padding: 10px 0; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); }
+    .decision-row { display: flex; justify-content: space-between; gap: 10px; margin: 9px 0; }
+    .decision-row span { color: var(--muted); }
+    .decision-row strong { text-align: right; }
+    .decision-note h3 { margin: 17px 0 8px; color: var(--muted); font-size: 11px; text-transform: uppercase; }
+    .decision-note p { color: #cbd7e4; line-height: 1.6; font-size: 12px; }
+    .report-reader { min-width: 0; padding: 18px; overflow: hidden; }
+    .report-reader .empty-report { height: 320px; display: grid; place-items: center; text-align: center; color: var(--muted); }
+    .md { color: #cdd8e5; line-height: 1.68; }
+    .md h1 { color: var(--text); font-size: 20px; }
+    .md h2 { color: var(--text); font-size: 16px; margin-top: 1.35em; }
+    .md h3 { color: var(--text); font-size: 14px; }
+    .md p { margin: .65em 0; }
+    .md table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .md th, .md td { padding: 7px 8px; border: 1px solid var(--line); text-align: left; }
+    .md th { background: var(--surface-3); color: var(--text); }
+    .md pre { overflow: auto; padding: 10px; background: #070d13; border: 1px solid var(--line); border-radius: 4px; }
+    .history-versions { display: grid; gap: 7px; }
+    .version-btn {
+      width: 100%; padding: 10px 12px; display: flex; align-items: center; gap: 12px;
+      border: 1px solid var(--line); border-radius: 4px; background: transparent; text-align: left;
+    }
+    .version-btn:hover, .version-btn.active { border-color: var(--blue); background: var(--blue-soft); }
+    .version-btn time { color: var(--muted); }
+    .version-btn .badge { margin-left: auto; }
+
+    /* Modal */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; z-index: 30; padding: 24px;
+      background: rgba(2,6,10,.78); align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      width: min(760px, 100%); max-height: 92vh; overflow: auto;
+      border: 1px solid var(--line); border-radius: 7px; background: var(--surface);
+    }
+    .modal-header { height: 54px; padding: 0 17px; display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+    .modal-header h2 { margin: 0; font-size: 16px; }
+    .modal-close { margin-left: auto; border: 0; background: none; color: var(--muted); }
+    .modal-body { padding: 17px; }
+    .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .field { min-width: 0; }
+    .field.wide { grid-column: 1 / -1; }
+    .field label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; text-transform: uppercase; }
+    .field input, .field select {
+      width: 100%; height: 36px; padding: 0 9px; outline: 0;
+      border: 1px solid var(--line); border-radius: 4px; background: #09111a;
+    }
+    .field input:focus, .field select:focus { border-color: var(--blue); }
+    .segmented { height: 36px; display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+    .mode-btn { flex: 1; border: 0; border-right: 1px solid var(--line); background: #09111a; color: var(--muted); }
+    .mode-btn:last-child { border-right: 0; }
+    .mode-btn.active { background: var(--blue); color: #fff; }
+    .position-btn { flex: 1; border: 0; border-right: 1px solid var(--line); background: #09111a; color: var(--muted); }
+    .position-btn:last-child { border-right: 0; }
+    .position-btn.active { background: var(--blue); color: #fff; }
+    .hidden { display: none !important; }
+    .toggle { height: 36px; display: flex; align-items: center; gap: 8px; color: var(--muted); }
+    .toggle input { width: 15px; height: 15px; accent-color: var(--blue); }
+    .modal-footer { padding: 13px 17px; display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); }
+    .debug-log {
+      max-height: 65vh; overflow: auto; margin: 0; padding: 12px;
+      background: #070c12; border: 1px solid var(--line); border-radius: 4px;
+      color: #a8b8c9; font: 11px/1.55 ui-monospace, monospace; white-space: pre-wrap;
+    }
+
+    @media (max-width: 1180px) {
+      :root { --sidebar: 240px; }
+      .market-grid { grid-template-columns: 185px minmax(300px, 1fr) 310px; }
+      .quote-cell { padding: 8px; }
+      .report-tab { padding: 0 8px; }
+    }
+    @media (max-width: 920px) {
+      body { overflow: auto; }
+      .app { height: auto; min-height: 100dvh; grid-template-columns: 1fr; overflow: visible; }
+      .sidebar { display: none; }
+      .terminal { min-height: 100dvh; overflow: visible; }
+      .terminal-scroll { overflow: visible; }
+      .market-grid { grid-template-columns: 1fr; }
+      .price-block, .chart-block { border-right: 0; border-bottom: 1px solid var(--line); }
+      .quote-grid { grid-template-columns: 1fr 1fr; }
+      .profile-strip { grid-template-columns: 1fr 1fr; }
+      .analysis-strip { grid-template-columns: auto 1fr auto; gap: 10px; padding: 10px 12px; }
+      .analysis-state, .debug-link { grid-column: span 3; }
+      .report-toolbar { height: auto; min-height: 52px; flex-wrap: wrap; gap: 5px; padding: 8px 12px; }
+      .report-tabs { order: 3; width: 100%; overflow-x: auto; }
+      .report-body { grid-template-columns: 1fr; }
+      .decision-panel { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+    @media (max-width: 560px) {
+      .terminal-header { padding: 0 12px; }
+      .instrument-title h1 { font-size: 16px; }
+      .action-btn span { display: none; }
+      .market-grid { min-height: 0; }
+      .profile-strip, .quote-grid { grid-template-columns: 1fr 1fr; }
+      .config-grid { grid-template-columns: 1fr; }
+      .field.wide { grid-column: auto; }
+      .report-actions { width: 100%; margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><i data-lucide="chart-candlestick" class="icon brand-mark"></i>FxxKStock<button class="brand-menu" aria-label="Menu"><i data-lucide="menu" class="icon"></i></button></div>
+      <div class="side-controls">
+        <button class="new-analysis" id="newAnalysisBtn"><span>新建分析</span><i data-lucide="plus" class="icon"></i></button>
+        <div class="search-wrap"><i data-lucide="search" class="icon"></i><input id="stockSearch" placeholder="搜索股票/ETF/指数" /></div>
+      </div>
+      <div class="stock-group-label">分析标的</div>
+      <div class="stock-list" id="stockList"><div class="empty-list">暂无历史分析</div></div>
+    </aside>
+
+    <main class="terminal">
+      <header class="terminal-header">
+        <div class="instrument-title"><h1 id="instrumentName">选择一个分析标的</h1><p id="instrumentMeta">从左侧历史记录选择，或新建分析</p></div>
+        <button class="action-btn primary" id="reanalyzeBtn"><i data-lucide="refresh-cw" class="icon"></i><span>重新分析</span></button>
+        <button class="icon-btn" id="settingsBtn" aria-label="设置"><i data-lucide="settings" class="icon"></i></button>
+      </header>
+
+      <div class="terminal-scroll">
+        <section class="market-overview">
+          <div class="market-grid">
+            <div class="price-block">
+              <div class="eyebrow">最新价</div>
+              <div class="last-price" id="lastPrice">-</div>
+              <div class="price-change" id="priceChange">行情数据待加载</div>
+              <div class="market-status"><span class="market-dot"></span><span id="quoteTime">-</span></div>
+            </div>
+            <div class="chart-block">
+              <div class="range-tabs">
+                <button class="range-btn active" data-range="1d">1日</button>
+                <button class="range-btn" data-range="5d">5日</button>
+                <button class="range-btn" data-range="1mo">1月</button>
+                <button class="range-btn" data-range="6mo">6月</button>
+                <button class="range-btn" data-range="1y">1年</button>
+              </div>
+              <div class="chart-wrap"><canvas id="priceChart"></canvas><div class="chart-empty" id="chartEmpty">暂无价格序列</div></div>
+            </div>
+            <div class="quote-grid" id="quoteGrid"></div>
+          </div>
+          <div class="profile-strip" id="profileStrip"></div>
+        </section>
+
+        <section class="analysis-strip">
+          <h2>AI 分析</h2>
+          <div class="analysis-state" id="analysisState">等待开始</div>
+          <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+          <div class="progress-number" id="progressNumber">0%</div>
+          <button class="debug-link" id="debugBtn"><i data-lucide="bug" class="icon"></i>查看运行日志</button>
+        </section>
+
+        <section class="report-shell">
+          <div class="report-toolbar">
+            <h2>最终报告</h2>
+            <div class="report-tabs">
+              <button class="report-tab active" data-report-tab="summary">执行摘要</button>
+              <button class="report-tab" data-report-tab="thesis">投资逻辑</button>
+              <button class="report-tab" data-report-tab="risks">风险因素</button>
+              <button class="report-tab" data-report-tab="data">数据依据</button>
+              <button class="report-tab" data-report-tab="history">历史对比</button>
+            </div>
+            <div class="report-actions">
+              <button class="small-btn" id="exportBtn"><i data-lucide="download" class="icon"></i>导出报告</button>
+              <button class="small-btn" id="versionsBtn"><i data-lucide="history" class="icon"></i>历史版本</button>
+            </div>
+          </div>
+          <div class="report-body">
+            <aside class="decision-panel">
+              <div class="decision-rating" id="decisionRating">等待报告</div>
+              <div class="decision-stats">
+                <div class="decision-row"><span>评级</span><strong id="decisionLabel">-</strong></div>
+                <div class="decision-row"><span>目标价</span><strong id="decisionTarget">-</strong></div>
+                <div class="decision-row"><span>时间范围</span><strong id="decisionHorizon">-</strong></div>
+                <div class="decision-row"><span>最新版本</span><strong id="decisionDate">-</strong></div>
+              </div>
+              <div class="decision-note"><h3>核心观点</h3><p id="decisionNote">完成一次分析后，这里将显示投资组合经理的最终结论。</p></div>
+            </aside>
+            <article class="report-reader"><div id="reportContent" class="md"><div class="empty-report">选择历史版本或运行一次新分析</div></div></article>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="analysisModal">
+    <div class="modal">
+      <div class="modal-header"><h2>分析配置</h2><button class="modal-close" data-close="analysisModal"><i data-lucide="x" class="icon"></i></button></div>
+      <div class="modal-body"><div class="config-grid">
+        <div class="field"><label>股票代码</label><input id="ticker" value="600353.SS" /></div>
+        <div class="field"><label>分析日期</label><input id="tradeDate" type="date" /></div>
+        <div class="field"><label>模型供应商</label><select id="provider"></select></div>
+        <div class="field"><label>记忆模式</label><select id="analysisMode"><option value="auto">自动增量</option><option value="full">完整刷新</option></select></div>
+        <div class="field wide"><label>快速模型</label><select id="quickModel"></select></div>
+        <div class="field wide"><label>深度模型</label><select id="deepModel"></select></div>
+        <div class="field wide"><label>研究深度</label><div class="segmented">
+          <button class="mode-btn active" data-mode="simple">简单</button>
+          <button class="mode-btn" data-mode="medium">中等</button>
+          <button class="mode-btn" data-mode="complex">复杂</button>
+        </div></div>
+        <div class="field wide"><label>持仓状态</label><div class="segmented">
+          <button class="position-btn active" type="button" data-position-status="unknown">未提供</button>
+          <button class="position-btn" type="button" data-position-status="flat">空仓</button>
+          <button class="position-btn" type="button" data-position-status="held">持有</button>
+        </div></div>
+        <div class="field hidden" id="quantityField"><label>持股数量</label><input id="positionQuantity" type="number" min="0.000001" step="any" inputmode="decimal" /></div>
+        <div class="field hidden" id="averageCostField"><label>平均成本价</label><input id="positionAverageCost" type="number" min="0.000001" step="any" inputmode="decimal" /></div>
+        <div class="field"><label>Chrome 平台</label><select id="chromePlatform"><option value="macos">macOS</option><option value="windows">Windows</option><option value="ubuntu">Ubuntu</option></select></div>
+        <div class="field"><label>浏览器数据</label><label class="toggle"><input id="chromeAutoStart" type="checkbox" checked />自动启动 Chrome</label></div>
+      </div></div>
+      <div class="modal-footer"><button class="action-btn" data-close="analysisModal">取消</button><button class="action-btn primary" id="runBtn"><i data-lucide="play" class="icon"></i>开始分析</button></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="debugModal">
+    <div class="modal">
+      <div class="modal-header"><h2>运行日志</h2><button class="modal-close" data-close="debugModal"><i data-lucide="x" class="icon"></i></button></div>
+      <div class="modal-body"><pre class="debug-log" id="debugLog">暂无运行日志</pre></div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const REPORT_TABS = ["summary", "thesis", "risks", "data", "history"];
+    const RATING_LABELS = {
+      BUY: "买入", OVERWEIGHT: "增持", HOLD: "持有",
+      UNDERWEIGHT: "减持", SELL: "卖出",
+    };
+    let historyItems = [];
+    let stockGroups = [];
+    let selectedTicker = null;
+    let selectedReportId = null;
+    let selectedMode = "simple";
+    let positionStatus = "unknown";
+    let currentRunId = null;
+    let eventSource = null;
+    let runStartedAt = null;
+    let elapsedTimer = null;
+    let completedSections = new Set();
+    let eventLog = [];
+    let currentReport = { markdown: "", sections: {} };
+    let currentOverview = null;
+    let activeReportTab = "summary";
+    let modelCatalog = {};
+
+    function icons() { if (window.lucide) lucide.createIcons(); }
+    function escapeHtml(text) { const node = document.createElement("div"); node.textContent = text || ""; return node.innerHTML; }
+    function renderMarkdown(text) { return DOMPurify.sanitize(marked.parse(text || "")); }
+    function formatDate(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    }
+    function formatNumber(value, digits = 2) {
+      return value == null || Number.isNaN(Number(value))
+        ? "-"
+        : Number(value).toLocaleString(undefined, { maximumFractionDigits: digits });
+    }
+    function formatCompact(value) {
+      if (value == null || Number.isNaN(Number(value))) return "-";
+      const number = Number(value);
+      if (Math.abs(number) >= 1e12) return `${(number / 1e12).toFixed(2)}万亿`;
+      if (Math.abs(number) >= 1e8) return `${(number / 1e8).toFixed(2)}亿`;
+      if (Math.abs(number) >= 1e4) return `${(number / 1e4).toFixed(2)}万`;
+      return formatNumber(number);
+    }
+    function decisionTone(value = "") {
+      const rating = value.toUpperCase();
+      if (rating.includes("SELL") || rating.includes("UNDER")) return "red";
+      if (rating.includes("BUY") || rating.includes("OVER")) return "green";
+      return "blue";
+    }
+    function currencyPrefix(currency) {
+      return currency === "CNY" ? "¥" : currency === "USD" ? "$" : currency === "HKD" ? "HK$" : "";
+    }
+    function formatPrice(value, currency) {
+      if (value == null) return "-";
+      return `${currencyPrefix(currency)}${formatNumber(value, 3)}`;
+    }
+    function openModal(id) { $(id).classList.add("open"); }
+    function closeModal(id) { $(id).classList.remove("open"); }
+    function logEvent(data) {
+      eventLog.push({ time: new Date().toISOString(), ...data });
+      $("debugLog").textContent = eventLog.map((item) => `[${item.time}] ${JSON.stringify(item)}`).join("\n");
+    }
+
+    function groupHistory(items) {
+      const map = new Map();
+      items.forEach((item) => {
+        const ticker = (item.ticker || "").toUpperCase();
+        if (!map.has(ticker)) map.set(ticker, { ticker, name: item.name || "", latest: item, reports: [] });
+        const group = map.get(ticker);
+        if (!group.name && item.name) group.name = item.name;
+        group.reports.push(item);
+      });
+      return [...map.values()];
+    }
+    function renderStockList() {
+      const query = $("stockSearch").value.trim().toLowerCase();
+      const groups = stockGroups.filter((group) =>
+        `${group.ticker} ${group.name || ""} ${group.latest.title || ""}`.toLowerCase().includes(query)
+      );
+      $("stockList").innerHTML = groups.length ? groups.map((group) => `
+        <button class="stock-item ${group.ticker === selectedTicker ? "active" : ""}" data-ticker="${escapeHtml(group.ticker)}">
+          <div class="stock-item-top"><span>${escapeHtml(group.ticker)}</span>${group.latest.decision ? `<span class="badge ${decisionTone(group.latest.decision)}">${escapeHtml(RATING_LABELS[group.latest.decision] || group.latest.decision)}</span>` : ""}<span class="stock-count">${group.reports.length}</span></div>
+          <div class="stock-item-bottom"><span title="${escapeHtml(group.name || group.ticker)}">${escapeHtml(group.name || group.ticker)}</span><span class="stock-date">${escapeHtml(formatDate(group.latest.created_at).slice(0, 10))}</span></div>
+        </button>`).join("") : '<div class="empty-list">没有匹配的分析标的</div>';
+      document.querySelectorAll(".stock-item").forEach((button) =>
+        button.addEventListener("click", () => selectStock(button.dataset.ticker))
+      );
+    }
+    async function loadHistory(selectFirst = false) {
+      const response = await fetch("/api/reports/history?limit=500");
+      if (!response.ok) return;
+      historyItems = (await response.json()).reports || [];
+      stockGroups = groupHistory(historyItems);
+      renderStockList();
+      if (selectFirst && !selectedTicker && stockGroups.length) await selectStock(stockGroups[0].ticker);
+    }
+
+    function quoteCells(overview) {
+      const quote = overview.quote || {};
+      return [
+        ["今开", formatPrice(quote.open, overview.currency)],
+        ["52周最高", formatPrice(quote.fifty_two_week_high, overview.currency)],
+        ["最高", formatPrice(quote.high, overview.currency)],
+        ["52周最低", formatPrice(quote.fifty_two_week_low, overview.currency)],
+        ["最低", formatPrice(quote.low, overview.currency)],
+        ["市盈率 (TTM)", formatNumber(quote.trailing_pe)],
+        ["昨收", formatPrice(quote.previous_close, overview.currency)],
+        ["市净率 (PB)", formatNumber(quote.price_to_book)],
+        ["成交量", formatCompact(quote.volume)],
+        ["总市值", formatCompact(quote.market_cap)],
+        ["成交额", formatCompact(quote.turnover)],
+        ["币种", overview.currency || "-"],
+      ];
+    }
+    function renderOverview(overview) {
+      currentOverview = overview;
+      const quote = overview.quote || {};
+      const details = overview.details || {};
+      const group = stockGroups.find((item) => item.ticker === overview.ticker);
+      if (group && overview.name && overview.name !== overview.ticker && group.name !== overview.name) {
+        group.name = overview.name;
+        renderStockList();
+      }
+      $("instrumentName").textContent = `${overview.ticker} · ${overview.name || overview.ticker}`;
+      $("instrumentMeta").textContent = [overview.exchange || overview.market_region, quote.as_of && `更新于 ${formatDate(quote.as_of)}`].filter(Boolean).join(" · ");
+      $("lastPrice").textContent = formatPrice(quote.last_price, overview.currency);
+      const change = Number(quote.change);
+      const changePercent = Number(quote.change_percent);
+      $("priceChange").className = `price-change ${change > 0 ? "positive" : change < 0 ? "negative" : ""}`;
+      $("priceChange").textContent = quote.change == null ? "行情数据不可用" : `${change >= 0 ? "+" : ""}${formatNumber(change, 3)}  ${changePercent >= 0 ? "+" : ""}${formatNumber(changePercent, 2)}%`;
+      $("quoteTime").textContent = quote.as_of ? formatDate(quote.as_of) : "未取得最新行情";
+      $("quoteGrid").innerHTML = quoteCells(overview).map(([label, value]) => `<div class="quote-cell"><span>${label}</span><strong>${value}</strong></div>`).join("");
+      const profile = [
+        ["类型", details.instrument_type || details.category || details.quote_type || "证券"],
+        ["跟踪指数", details.tracking_index || "-"],
+        ["管理人", details.fund_family || "-"],
+        ["成立日期", details.inception_date || "-"],
+        ["交易所", overview.exchange || overview.market_region || "-"],
+      ];
+      $("profileStrip").innerHTML = profile.map(([label, value]) => `<div class="profile-cell"><span>${label}</span><strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong></div>`).join("");
+      drawChart(overview.chart || []);
+    }
+    function drawChart(points) {
+      const canvas = $("priceChart");
+      const parent = canvas.parentElement;
+      const ratio = window.devicePixelRatio || 1;
+      const width = Math.max(200, parent.clientWidth);
+      const height = Math.max(130, parent.clientHeight);
+      canvas.width = Math.round(width * ratio);
+      canvas.height = Math.round(height * ratio);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(ratio, ratio);
+      ctx.clearRect(0, 0, width, height);
+      $("chartEmpty").style.display = points.length > 1 ? "none" : "grid";
+      if (points.length < 2) return;
+      const values = points.map((point) => Number(point.close));
+      let min = Math.min(...values), max = Math.max(...values);
+      const pad = Math.max((max - min) * .14, Math.abs(max) * .004);
+      min -= pad; max += pad;
+      const x = (index) => 8 + index / (points.length - 1) * (width - 16);
+      const y = (value) => 8 + (max - value) / (max - min || 1) * (height - 24);
+      ctx.strokeStyle = "#223243";
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 4; i += 1) {
+        const gy = i * height / 4;
+        ctx.beginPath(); ctx.moveTo(8, gy); ctx.lineTo(width - 8, gy); ctx.stroke();
+      }
+      const gradient = ctx.createLinearGradient(0, 0, 0, height);
+      gradient.addColorStop(0, "rgba(52,124,246,.3)");
+      gradient.addColorStop(1, "rgba(52,124,246,0)");
+      ctx.beginPath();
+      values.forEach((value, index) => index ? ctx.lineTo(x(index), y(value)) : ctx.moveTo(x(index), y(value)));
+      ctx.lineTo(x(values.length - 1), height - 12); ctx.lineTo(x(0), height - 12); ctx.closePath();
+      ctx.fillStyle = gradient; ctx.fill();
+      ctx.beginPath();
+      values.forEach((value, index) => index ? ctx.lineTo(x(index), y(value)) : ctx.moveTo(x(index), y(value)));
+      ctx.strokeStyle = "#3f8cff"; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+    async function loadOverview(range = "1d") {
+      if (!selectedTicker) return;
+      const response = await fetch(`/api/stocks/${encodeURIComponent(selectedTicker)}/overview?range=${range}`);
+      if (!response.ok) return;
+      renderOverview(await response.json());
+    }
+    async function selectStock(ticker) {
+      selectedTicker = ticker;
+      renderStockList();
+      $("ticker").value = ticker;
+      document.querySelectorAll(".range-btn").forEach((button) => button.classList.toggle("active", button.dataset.range === "1d"));
+      const group = stockGroups.find((item) => item.ticker === ticker);
+      $("instrumentName").textContent = `${ticker} · ${group?.name || ticker}`;
+      $("instrumentMeta").textContent = "正在更新行情…";
+      const reportPromise = group?.reports.length ? loadReport(group.reports[0].id) : Promise.resolve(clearReport());
+      const overviewPromise = loadOverview("1d");
+      await Promise.allSettled([reportPromise, overviewPromise]);
+    }
+
+    function parseField(markdown, label) {
+      const pattern = new RegExp(`\\*\\*${label}\\*\\*\\s*:\\s*([^\\n]+)`, "i");
+      return markdown.match(pattern)?.[1]?.trim() || "-";
+    }
+    function extractRating(markdown, fallback = "") {
+      const match = markdown.match(/\*\*(?:Rating|评级)\*\*\s*:\s*(Buy|Overweight|Hold|Underweight|Sell)/i);
+      return (match?.[1] || fallback || "").toUpperCase();
+    }
+    function summarySentence(markdown) {
+      const executive = markdown.match(/\*\*Executive Summary\*\*\s*:\s*([\s\S]*?)(?=\n\n\*\*|$)/i)?.[1];
+      const plain = (executive || markdown || "").replace(/[#*_`>\[\]]/g, "").replace(/\s+/g, " ").trim();
+      return plain.slice(0, 280) || "暂无摘要";
+    }
+    function updateDecisionPanel(data) {
+      const summary = data.sections?.summary || data.markdown || "";
+      const rating = extractRating(summary, data.decision);
+      $("decisionRating").textContent = rating ? `${RATING_LABELS[rating] || rating} ${rating}` : "等待报告";
+      $("decisionRating").className = `decision-rating ${decisionTone(rating) === "red" ? "negative" : decisionTone(rating) === "green" ? "positive" : ""}`;
+      $("decisionLabel").textContent = RATING_LABELS[rating] || rating || "-";
+      $("decisionTarget").textContent = parseField(summary, "Price Target");
+      $("decisionHorizon").textContent = parseField(summary, "Time Horizon");
+      $("decisionDate").textContent = data.created_at ? formatDate(data.created_at).slice(0, 16) : new Date().toLocaleString().slice(0, 16);
+      $("decisionNote").textContent = summarySentence(summary);
+    }
+    function clearReport() {
+      currentReport = { markdown: "", sections: {} };
+      $("reportContent").innerHTML = '<div class="empty-report">该股票还没有分析报告</div>';
+      $("decisionRating").textContent = "等待报告";
+      ["decisionLabel", "decisionTarget", "decisionHorizon", "decisionDate"].forEach((id) => $(id).textContent = "-");
+      $("decisionNote").textContent = "完成一次分析后，这里将显示投资组合经理的最终结论。";
+    }
+    async function loadReport(reportId) {
+      const response = await fetch(`/api/reports/history/${encodeURIComponent(reportId)}`);
+      if (!response.ok) return;
+      selectedReportId = reportId;
+      currentReport = await response.json();
+      updateDecisionPanel(currentReport);
+      renderReportTab(activeReportTab);
+    }
+    function renderHistoryVersions() {
+      const group = stockGroups.find((item) => item.ticker === selectedTicker);
+      const reports = group?.reports || [];
+      return `<div class="history-versions">${reports.map((item) => `
+        <button class="version-btn ${item.id === selectedReportId ? "active" : ""}" data-version="${escapeHtml(item.id)}">
+          <time>${escapeHtml(formatDate(item.created_at).slice(0, 16))}</time>
+          <span>分析报告</span>
+          ${item.decision ? `<span class="badge ${decisionTone(item.decision)}">${escapeHtml(RATING_LABELS[item.decision] || item.decision)}</span>` : ""}
+        </button>`).join("") || "暂无历史版本"}</div>`;
+    }
+    function renderReportTab(tab) {
+      activeReportTab = tab;
+      document.querySelectorAll(".report-tab").forEach((button) => button.classList.toggle("active", button.dataset.reportTab === tab));
+      if (tab === "history") {
+        $("reportContent").innerHTML = renderHistoryVersions();
+        document.querySelectorAll(".version-btn").forEach((button) => button.addEventListener("click", () => loadReport(button.dataset.version)));
+        return;
+      }
+      const content = currentReport.sections?.[tab] || (tab === "summary" ? currentReport.markdown : "");
+      $("reportContent").innerHTML = content ? renderMarkdown(content) : '<div class="empty-report">该章节暂无内容</div>';
+    }
+
+    function fillModelSelect(select, options) {
+      select.innerHTML = "";
+      options.forEach((option) => select.add(new Option(option.label, option.value)));
+    }
+    function refreshModels() {
+      const modes = modelCatalog[$("provider").value] || { quick: [], deep: [] };
+      fillModelSelect($("quickModel"), modes.quick || []);
+      fillModelSelect($("deepModel"), modes.deep || []);
+    }
+    async function loadModels() {
+      const response = await fetch("/api/models");
+      if (!response.ok) return;
+      const data = await response.json();
+      modelCatalog = data.providers || {};
+      $("provider").innerHTML = "";
+      (data.provider_list || Object.keys(modelCatalog)).forEach((provider) => $("provider").add(new Option(provider, provider)));
+      if (modelCatalog.deepseek) $("provider").value = "deepseek";
+      refreshModels();
+    }
+    function selectModelValue(select, value) {
+      if (!value) return;
+      if (![...select.options].some((option) => option.value === value)) {
+        select.add(new Option(`${value} (自定义)`, value));
+      }
+      select.value = value;
+    }
+    async function loadAnalysisDefaults() {
+      const response = await fetch("/api/settings");
+      if (!response.ok) return;
+      const { general = {} } = await response.json();
+      if (general.llm_provider && modelCatalog[general.llm_provider]) {
+        $("provider").value = general.llm_provider;
+        refreshModels();
+      }
+      selectModelValue($("quickModel"), general.quick_think_llm);
+      selectModelValue($("deepModel"), general.deep_think_llm);
+      if (general.web_analysis_mode) $("analysisMode").value = general.web_analysis_mode;
+      if (general.cn_browser_platform) $("chromePlatform").value = general.cn_browser_platform;
+      $("chromeAutoStart").checked = general.cn_browser_auto_start !== false;
+      selectedMode = general.web_research_depth || "simple";
+      document.querySelectorAll(".mode-btn").forEach((button) => {
+        button.classList.toggle("active", button.dataset.mode === selectedMode);
+      });
+    }
+    async function loadModelsAndDefaults() {
+      await loadModels();
+      await loadAnalysisDefaults();
+    }
+
+    function setProgress(percent, text) {
+      const value = Math.max(0, Math.min(100, percent));
+      $("progressFill").style.width = `${value}%`;
+      $("progressNumber").textContent = `${Math.round(value)}%`;
+      if (text) $("analysisState").textContent = text;
+    }
+    function progressStage(section = "") {
+      const value = section.toLowerCase();
+      if (value.includes("market")) return "market";
+      if (value.includes("fundamental")) return "fundamentals";
+      if (value.includes("news") || value.includes("sentiment")) return "news_sentiment";
+      if (value.includes("bull") || value.includes("bear") || value.includes("research")) return "research";
+      if (value.includes("trader")) return "trading";
+      if (value.includes("risk") || value.includes("portfolio") || value.includes("final")) return "risk_portfolio";
+      return null;
+    }
+    function startElapsedClock() {
+      clearInterval(elapsedTimer);
+      runStartedAt = Date.now();
+      elapsedTimer = setInterval(() => {
+        const seconds = Math.floor((Date.now() - runStartedAt) / 1000);
+        const elapsed = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+        $("analysisState").textContent = `分析中 · ${completedSections.size}/6 已完成 · 用时 ${elapsed}`;
+      }, 1000);
+    }
+    async function startRun() {
+      const ticker = $("ticker").value.trim();
+      if (!ticker || !$("quickModel").value || !$("deepModel").value) return;
+      let position;
+      if (positionStatus === "flat") {
+        position = { status: "flat" };
+      } else if (positionStatus === "held") {
+        const quantity = Number($("positionQuantity").value);
+        const averageCost = Number($("positionAverageCost").value);
+        if (!(quantity > 0) || !(averageCost > 0)) {
+          alert("持有状态需要填写大于 0 的持股数量和平均成本价。");
+          return;
+        }
+        position = { status: "held", quantity, average_cost: averageCost };
+      }
+      closeModal("analysisModal");
+      selectedTicker = ticker.toUpperCase();
+      completedSections = new Set();
+      eventLog = [];
+      logEvent({ type: "client", message: "analysis submitted", ticker });
+      setProgress(2, "正在提交分析...");
+      startElapsedClock();
+      $("runBtn").disabled = true;
+      const response = await fetch("/api/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker,
+          trade_date: $("tradeDate").value,
+          provider: $("provider").value,
+          quick_model: $("quickModel").value,
+          deep_model: $("deepModel").value,
+          mode: selectedMode,
+          analysis_mode: $("analysisMode").value,
+          chrome_platform: $("chromePlatform").value,
+          chrome_auto_start: $("chromeAutoStart").checked,
+          ...(position ? { position } : {}),
+        }),
+      });
+      if (!response.ok) {
+        clearInterval(elapsedTimer); setProgress(0, "启动失败"); $("runBtn").disabled = false; return;
+      }
+      currentRunId = (await response.json()).run_id;
+      eventSource?.close();
+      eventSource = new EventSource(`/api/runs/${currentRunId}/events`);
+      eventSource.onmessage = async (event) => {
+        let data; try { data = JSON.parse(event.data); } catch { return; }
+        if (data.type === "heartbeat") return;
+        logEvent(data);
+        if (data.type === "report_section") {
+          const stage = progressStage(data.section || data.label);
+          if (stage) completedSections.add(stage);
+          setProgress(Math.min(92, 8 + completedSections.size / 6 * 84));
+        }
+        if (data.type === "memory_loaded") setProgress(7, data.has_memory ? "已加载股票记忆" : "首次完整分析");
+        if (data.type === "browser_status" && data.state === "failed_fallback") $("analysisState").textContent = "Chrome 不可用，已切换 HTTP 数据源";
+        if (data.type === "done") {
+          clearInterval(elapsedTimer);
+          setProgress(100, "分析完成 · 6 个阶段");
+          eventSource.close(); eventSource = null; $("runBtn").disabled = false;
+          await loadHistory();
+          await loadOverview("1d");
+          const reportResponse = await fetch(`/api/runs/${currentRunId}/report`);
+          if (reportResponse.ok) {
+            currentReport = await reportResponse.json();
+            currentReport.created_at = new Date().toISOString();
+            updateDecisionPanel(currentReport);
+            renderReportTab("summary");
+          }
+        }
+        if (data.type === "error") {
+          clearInterval(elapsedTimer); setProgress(0, `分析失败 · ${data.message || "未知错误"}`);
+          eventSource.close(); eventSource = null; $("runBtn").disabled = false;
+        }
+      };
+    }
+    function exportReport() {
+      if (!currentReport.markdown) return;
+      const blob = new Blob([currentReport.markdown], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url; link.download = `${selectedTicker || "report"}-${new Date().toISOString().slice(0, 10)}.md`;
+      link.click(); URL.revokeObjectURL(url);
+    }
+
+    $("tradeDate").value = new Date().toISOString().slice(0, 10);
+    const platform = (navigator.platform || "").toLowerCase();
+    $("chromePlatform").value = platform.includes("mac") ? "macos" : platform.includes("win") ? "windows" : "ubuntu";
+    $("newAnalysisBtn").addEventListener("click", () => openModal("analysisModal"));
+    $("reanalyzeBtn").addEventListener("click", () => { if (selectedTicker) $("ticker").value = selectedTicker; openModal("analysisModal"); });
+    $("settingsBtn").addEventListener("click", () => { window.location.href = "/settings"; });
+    $("debugBtn").addEventListener("click", () => openModal("debugModal"));
+    $("versionsBtn").addEventListener("click", () => renderReportTab("history"));
+    $("exportBtn").addEventListener("click", exportReport);
+    $("runBtn").addEventListener("click", startRun);
+    $("provider").addEventListener("change", refreshModels);
+    $("stockSearch").addEventListener("input", renderStockList);
+    document.querySelectorAll("[data-close]").forEach((button) => button.addEventListener("click", () => closeModal(button.dataset.close)));
+    document.querySelectorAll(".modal-overlay").forEach((modal) => modal.addEventListener("click", (event) => { if (event.target === modal) closeModal(modal.id); }));
+    document.querySelectorAll(".mode-btn").forEach((button) => button.addEventListener("click", () => {
+      document.querySelectorAll(".mode-btn").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active"); selectedMode = button.dataset.mode;
+    }));
+    document.querySelectorAll(".position-btn").forEach((button) => button.addEventListener("click", () => {
+      document.querySelectorAll(".position-btn").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+      positionStatus = button.dataset.positionStatus;
+      const showHeld = positionStatus === "held";
+      $("quantityField").classList.toggle("hidden", !showHeld);
+      $("averageCostField").classList.toggle("hidden", !showHeld);
+      if (!showHeld) {
+        $("positionQuantity").value = "";
+        $("positionAverageCost").value = "";
+      }
+    }));
+    document.querySelectorAll(".range-btn").forEach((button) => button.addEventListener("click", async () => {
+      document.querySelectorAll(".range-btn").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active"); await loadOverview(button.dataset.range);
+    }));
+    document.querySelectorAll(".report-tab").forEach((button) => button.addEventListener("click", () => renderReportTab(button.dataset.reportTab)));
+    window.addEventListener("resize", () => { if (currentOverview) drawChart(currentOverview.chart || []); });
+    Promise.all([loadModelsAndDefaults(), loadHistory(true)]).catch((error) => logEvent({ type: "init_error", message: error.message }));
+    icons();
+  </script>
+</body>
+</html>
