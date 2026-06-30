@@ -170,11 +170,12 @@
     /* Report */
     .report-shell {
       margin: 0 10px 10px; min-height: 470px; border: 1px solid var(--line);
-      border-radius: 5px; background: var(--surface); overflow: hidden;
+      border-radius: 5px; background: var(--surface); overflow: clip;
     }
     .report-toolbar {
+      position: sticky; top: 0; z-index: 10;
       height: 52px; padding: 0 14px; display: flex; align-items: center;
-      border-bottom: 1px solid var(--line);
+      border-bottom: 1px solid var(--line); background: var(--surface);
     }
     .report-toolbar h2 { margin: 0 22px 0 0; font-size: 16px; }
     .report-tabs { align-self: stretch; display: flex; gap: 5px; }
@@ -189,14 +190,28 @@
       background: transparent; display: inline-flex; align-items: center; gap: 6px;
     }
     .report-body { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 416px; }
-    .decision-panel { padding: 18px; border-right: 1px solid var(--line); background: #0c151f; }
+    .decision-panel {
+      position: sticky; top: 52px; align-self: start;
+      max-height: calc(100dvh - 124px); overflow-y: auto;
+      padding: 18px; border-right: 1px solid var(--line); background: #0c151f;
+    }
     .decision-rating { font-size: 28px; font-weight: 720; text-transform: uppercase; }
     .decision-stats { margin: 17px 0; padding: 10px 0; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); }
     .decision-row { display: flex; justify-content: space-between; gap: 10px; margin: 9px 0; }
     .decision-row span { color: var(--muted); }
     .decision-row strong { text-align: right; }
     .decision-note h3 { margin: 17px 0 8px; color: var(--muted); font-size: 11px; text-transform: uppercase; }
-    .decision-note p { color: #cbd7e4; line-height: 1.6; font-size: 12px; }
+    .decision-note ul { margin: 0; padding: 0; list-style: none; }
+    .decision-note li {
+      position: relative; margin: 0; padding: 8px 0 8px 16px;
+      border-bottom: 1px solid var(--line-soft);
+      color: #cbd7e4; line-height: 1.6; font-size: 12px;
+    }
+    .decision-note li:last-child { border-bottom: 0; }
+    .decision-note li::before {
+      content: ""; position: absolute; left: 1px; top: 15px;
+      width: 5px; height: 5px; border-radius: 50%; background: var(--blue);
+    }
     .report-reader { min-width: 0; padding: 18px; overflow: hidden; }
     .report-reader .empty-report { height: 320px; display: grid; place-items: center; text-align: center; color: var(--muted); }
     .md { color: #cdd8e5; line-height: 1.68; }
@@ -276,9 +291,13 @@
       .analysis-strip { grid-template-columns: auto 1fr auto; gap: 10px; padding: 10px 12px; }
       .analysis-state, .debug-link { grid-column: span 3; }
       .report-toolbar { height: auto; min-height: 52px; flex-wrap: wrap; gap: 5px; padding: 8px 12px; }
+      .report-toolbar { position: static; }
       .report-tabs { order: 3; width: 100%; overflow-x: auto; }
       .report-body { grid-template-columns: 1fr; }
-      .decision-panel { border-right: 0; border-bottom: 1px solid var(--line); }
+      .decision-panel {
+        position: static; max-height: none; overflow: visible;
+        border-right: 0; border-bottom: 1px solid var(--line);
+      }
     }
     @media (max-width: 560px) {
       .terminal-header { padding: 0 12px; }
@@ -367,7 +386,7 @@
                 <div class="decision-row"><span>时间范围</span><strong id="decisionHorizon">-</strong></div>
                 <div class="decision-row"><span>最新版本</span><strong id="decisionDate">-</strong></div>
               </div>
-              <div class="decision-note"><h3>核心观点</h3><p id="decisionNote">完成一次分析后，这里将显示投资组合经理的最终结论。</p></div>
+              <div class="decision-note"><h3>核心观点</h3><ul id="decisionNote"><li>完成一次分析后，这里将显示投资组合经理的最终结论。</li></ul></div>
             </aside>
             <article class="report-reader"><div id="reportContent" class="md"><div class="empty-report">选择历史版本或运行一次新分析</div></div></article>
           </div>
@@ -621,10 +640,39 @@
       const match = markdown.match(/\*\*(?:Rating|评级)\*\*\s*:\s*(Buy|Overweight|Hold|Underweight|Sell)/i);
       return (match?.[1] || fallback || "").toUpperCase();
     }
-    function summarySentence(markdown) {
+    function corePoints(markdown) {
       const executive = markdown.match(/\*\*Executive Summary\*\*\s*:\s*([\s\S]*?)(?=\n\n\*\*|$)/i)?.[1];
-      const plain = (executive || markdown || "").replace(/[#*_`>\[\]]/g, "").replace(/\s+/g, " ").trim();
-      return plain.slice(0, 280) || "暂无摘要";
+      const plain = (executive || markdown || "")
+        .replace(/[#*_`>\[\]]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!plain) return ["暂无摘要"];
+
+      let points = plain
+        .split(/(?<=[。！？!?；;])\s*/)
+        .map((point) => point.trim())
+        .filter(Boolean);
+
+      // Some model outputs use one comma-heavy sentence. Split it into readable
+      // conclusions without changing the wording when no sentence boundary exists.
+      if (points.length === 1 && plain.length > 140) {
+        points = plain
+          .split(/(?:，|,)\s*(?=(?:当前|本轮|成本|风险|建议|维持|等待|若|如|但|同时))/)
+          .map((point) => point.trim())
+          .filter(Boolean);
+      }
+      return points.slice(0, 6);
+    }
+    function renderCorePoints(markdown, generatedInsights = []) {
+      const list = $("decisionNote");
+      const points = Array.isArray(generatedInsights) && generatedInsights.length
+        ? generatedInsights.slice(0, 6)
+        : corePoints(markdown);
+      list.replaceChildren(...points.map((point) => {
+        const item = document.createElement("li");
+        item.textContent = point;
+        return item;
+      }));
     }
     function updateDecisionPanel(data) {
       const summary = data.sections?.summary || data.markdown || "";
@@ -635,14 +683,14 @@
       $("decisionTarget").textContent = parseField(summary, "Price Target");
       $("decisionHorizon").textContent = parseField(summary, "Time Horizon");
       $("decisionDate").textContent = data.created_at ? formatDate(data.created_at).slice(0, 16) : new Date().toLocaleString().slice(0, 16);
-      $("decisionNote").textContent = summarySentence(summary);
+      renderCorePoints(summary, data.core_insights);
     }
     function clearReport() {
       currentReport = { markdown: "", sections: {} };
       $("reportContent").innerHTML = '<div class="empty-report">该股票还没有分析报告</div>';
       $("decisionRating").textContent = "等待报告";
       ["decisionLabel", "decisionTarget", "decisionHorizon", "decisionDate"].forEach((id) => $(id).textContent = "-");
-      $("decisionNote").textContent = "完成一次分析后，这里将显示投资组合经理的最终结论。";
+      renderCorePoints("");
     }
     async function loadReport(reportId) {
       const response = await fetch(`/api/reports/history/${encodeURIComponent(reportId)}`);

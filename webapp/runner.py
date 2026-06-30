@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from pydantic import BaseModel, Field
 
+from fxxkstock.agents.utils.structured import bind_structured
 from fxxkstock.dataflows.utils import safe_ticker_component
 from fxxkstock.default_config import DEFAULT_CONFIG
 from fxxkstock.graph.fxxkstock_graph import FxxKStockGraph
@@ -37,6 +39,21 @@ ANALYST_REPORT_SECTIONS: dict[str, str] = {
     "news_report": "News Analyst",
     "fundamentals_report": "Fundamentals Analyst",
 }
+
+CORE_INSIGHTS_FILE = "core_insights.json"
+
+
+class CoreInsights(BaseModel):
+    """Compact AI synthesis shown in the report's persistent decision panel."""
+
+    insights: list[str] = Field(
+        min_length=4,
+        max_length=6,
+        description=(
+            "Four to six self-contained Simplified Chinese conclusions covering "
+            "the decision, action plan, strongest evidence, risks, and triggers."
+        ),
+    )
 
 
 @dataclass
@@ -117,6 +134,52 @@ def _extract_content_string(content: Any) -> str | None:
         joined = " ".join(parts)
         return joined or None
     return str(content).strip() or None
+
+
+def _parse_core_insights_text(content: Any) -> list[str]:
+    text = _extract_content_string(content) or ""
+    points = [
+        re.sub(r"^\s*(?:[-*•]+|\d+[.)、])\s*", "", line).strip()
+        for line in text.splitlines()
+        if re.match(r"^\s*(?:[-*•]+|\d+[.)、])\s*", line)
+    ]
+    return [point for point in points if point][:6]
+
+
+def _generate_core_insights(llm: Any, final_decision: str) -> list[str]:
+    """Run one post-analysis synthesis call without changing the main decision."""
+    prompt = (
+        "你是投资报告总编。请对下面的最终投资决策做大范围综合总结，输出4至6条"
+        "可独立阅读的简体中文核心观点。必须覆盖：最终评级与仓位、具体操作和价格位、"
+        "最关键的支持证据、主要风险、后续加减仓或止损触发条件。不要复述分析过程，"
+        "不要添加报告中没有的数据，每条只表达一个重点。\n\n"
+        f"最终投资决策：\n{final_decision[:30000]}"
+    )
+    structured = bind_structured(llm, CoreInsights, "Core Insights")
+    if structured is not None:
+        try:
+            result = structured.invoke(prompt)
+            if isinstance(result, CoreInsights):
+                return [point.strip() for point in result.insights if point.strip()][:6]
+            if isinstance(result, dict):
+                parsed = CoreInsights.model_validate(result)
+                return [point.strip() for point in parsed.insights if point.strip()][:6]
+        except Exception as exc:
+            logger.warning("Core Insights structured summary failed: %s", exc)
+
+    response = llm.invoke(prompt + "\n\n请使用无标题的 Markdown 项目符号列表输出。")
+    points = _parse_core_insights_text(getattr(response, "content", response))
+    if len(points) < 4:
+        raise ValueError("core insight summary did not contain at least four points")
+    return points
+
+
+def _write_core_insights(report_dir: Path, insights: list[str]) -> None:
+    payload = {"version": 1, "generated_by": "ai", "insights": insights}
+    (report_dir / CORE_INSIGHTS_FILE).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def _classify_message(message) -> tuple[str, str | None]:
@@ -360,6 +423,19 @@ def run_analysis(state: RunState, params: RunParams) -> None:
         report_file = write_report_tree(final_state, params.ticker, save_path)
         state.report_path = report_file.parent
         state.decision = graph.process_signal(final_state.get("final_trade_decision", ""))
+        _emit(state, {"type": "status", "message": "Generating core insights"})
+        try:
+            final_decision = final_state.get("final_trade_decision", "")
+            if final_decision and getattr(graph, "quick_thinking_llm", None) is not None:
+                insights = _generate_core_insights(
+                    graph.quick_thinking_llm,
+                    final_decision,
+                )
+                _write_core_insights(state.report_path, insights)
+        except Exception as exc:
+            # The post-processing summary is supplementary. A provider failure
+            # must not turn an otherwise complete analysis into a failed run.
+            logger.warning("Core insight generation failed for %s: %s", params.ticker, exc)
         graph.finalize_run(
             params.ticker,
             trade_date,

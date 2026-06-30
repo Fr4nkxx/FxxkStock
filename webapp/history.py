@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import re
+import json
 import logging
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ from fxxkstock.dataflows.utils import safe_ticker_component
 logger = logging.getLogger(__name__)
 
 _REPORT_DIR_PATTERN = re.compile(r"^(.+)_(\d{8})_(\d{6})$")
+_CORE_INSIGHTS_FILE = "core_insights.json"
 _CHART_RANGES = {
     "1d": ("1d", "5m"),
     "5d": ("5d", "15m"),
@@ -143,6 +145,22 @@ def read_report_sections(report_dir: Path) -> dict[str, str]:
     }
 
 
+def read_core_insights(report_dir: Path) -> list[str]:
+    """Read post-analysis AI insights; legacy reports intentionally return none."""
+    path = report_dir / _CORE_INSIGHTS_FILE
+    if not path.is_file():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        logger.warning("Ignoring invalid core insights file: %s", path)
+        return []
+    insights = payload.get("insights") if isinstance(payload, dict) else None
+    if not isinstance(insights, list):
+        return []
+    return [item.strip() for item in insights if isinstance(item, str) and item.strip()][:6]
+
+
 def list_historical_reports(reports_root: Path | None = None, limit: int = 100) -> list[dict]:
     """列出 reports/ 下已保存的历史报告，按时间倒序。"""
     root = reports_root or get_reports_root()
@@ -211,6 +229,7 @@ def get_historical_report(report_id: str, reports_root: Path | None = None) -> d
         "decision": _extract_decision(markdown),
         "markdown": markdown,
         "sections": read_report_sections(report_dir),
+        "core_insights": read_core_insights(report_dir),
         "report_dir": str(report_dir),
     }
 

@@ -24,6 +24,7 @@ from .history import (
     get_stock_overview,
     list_historical_reports,
     read_report_sections,
+    read_core_insights,
 )
 from .runner import RunParams, RunState, build_run_config, start_run
 from .settings_store import (
@@ -214,6 +215,7 @@ def get_report(run_id: str) -> dict[str, Any]:
         "available": bool(markdown),
         "markdown": markdown,
         "sections": read_report_sections(state.report_path),
+        "core_insights": read_core_insights(state.report_path),
         "decision": state.decision,
         "report_dir": str(state.report_path),
     }
