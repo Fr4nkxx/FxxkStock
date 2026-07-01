@@ -11,12 +11,15 @@ from fxxkstock.agents import (
     create_bull_researcher,
     create_conservative_debator,
     create_fundamentals_analyst,
+    create_falsification_auditor,
     create_market_analyst,
     create_msg_delete,
     create_neutral_debator,
     create_news_analyst,
     create_portfolio_manager,
     create_research_manager,
+    create_research_manager_revision,
+    create_researchability_assessor,
     create_sentiment_analyst,
     create_trader,
 )
@@ -67,6 +70,13 @@ class GraphSetup:
         bull_researcher_node = create_bull_researcher(self.quick_thinking_llm)
         bear_researcher_node = create_bear_researcher(self.quick_thinking_llm)
         research_manager_node = create_research_manager(self.deep_thinking_llm)
+        researchability_node = create_researchability_assessor(
+            self.quick_thinking_llm
+        )
+        falsification_node = create_falsification_auditor(self.deep_thinking_llm)
+        research_revision_node = create_research_manager_revision(
+            self.deep_thinking_llm
+        )
         trader_node = create_trader(self.quick_thinking_llm)
 
         # Create risk analysis nodes
@@ -88,6 +98,9 @@ class GraphSetup:
         workflow.add_node("Bull Researcher", bull_researcher_node)
         workflow.add_node("Bear Researcher", bear_researcher_node)
         workflow.add_node("Research Manager", research_manager_node)
+        workflow.add_node("Researchability Assessor", researchability_node)
+        workflow.add_node("Falsification Auditor", falsification_node)
+        workflow.add_node("Research Manager Revision", research_revision_node)
         workflow.add_node("Trader", trader_node)
         workflow.add_node("Aggressive Analyst", aggressive_analyst)
         workflow.add_node("Neutral Analyst", neutral_analyst)
@@ -112,13 +125,14 @@ class GraphSetup:
             )
             workflow.add_edge(current_tools, current_analyst)
 
-            # Connect to next analyst or to Bull Researcher if this is the last analyst
+            # Connect to next analyst or the pre-debate researchability gate.
             if i < len(plan.specs) - 1:
                 workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)
             else:
-                workflow.add_edge(current_clear, "Bull Researcher")
+                workflow.add_edge(current_clear, "Researchability Assessor")
 
         # Add remaining edges
+        workflow.add_edge("Researchability Assessor", "Bull Researcher")
         workflow.add_conditional_edges(
             "Bull Researcher",
             self.conditional_logic.should_continue_debate,
@@ -135,7 +149,16 @@ class GraphSetup:
                 "Research Manager": "Research Manager",
             },
         )
-        workflow.add_edge("Research Manager", "Trader")
+        workflow.add_edge("Research Manager", "Falsification Auditor")
+        workflow.add_conditional_edges(
+            "Falsification Auditor",
+            self.conditional_logic.should_revise_research,
+            {
+                "Research Manager Revision": "Research Manager Revision",
+                "Trader": "Trader",
+            },
+        )
+        workflow.add_edge("Research Manager Revision", "Trader")
         workflow.add_edge("Trader", "Aggressive Analyst")
         workflow.add_conditional_edges(
             "Aggressive Analyst",

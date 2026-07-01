@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -84,9 +85,13 @@ class TickerMemoryStore:
     ) -> dict[str, Any]:
         with self._lock_for(ticker):
             disk_previous = self.load(ticker, import_reports=False)
-            previous = disk_previous or previous
+            previous = disk_previous or (
+                previous if isinstance(previous, dict) else None
+            )
             reports = {}
             previous_reports = (previous or {}).get("reports", {})
+            if not isinstance(previous_reports, dict):
+                previous_reports = {}
             for key in REPORT_FILES:
                 value = final_state.get(key)
                 reports[key] = value if isinstance(value, str) and value.strip() else previous_reports.get(key, "")
@@ -100,6 +105,13 @@ class TickerMemoryStore:
                 )
             )
 
+            current_snapshot = final_state.get("current_market_snapshot")
+            if not isinstance(current_snapshot, dict):
+                current_snapshot = {}
+            previous_snapshot = (previous or {}).get("market_snapshot")
+            if not isinstance(previous_snapshot, dict):
+                previous_snapshot = {}
+
             snapshot = {
                 "version": SCHEMA_VERSION,
                 "ticker": ticker.upper(),
@@ -111,12 +123,59 @@ class TickerMemoryStore:
                     else (previous or {}).get("fundamentals_as_of", str(trade_date))
                 ),
                 "reports": reports,
-                "market_snapshot": final_state.get("current_market_snapshot")
-                or (previous or {}).get("market_snapshot")
+                "market_snapshot": current_snapshot or previous_snapshot,
+                "anti_bias": self._anti_bias_snapshot(final_state)
+                or (previous or {}).get("anti_bias")
                 or {},
             }
             self.save(snapshot)
             return snapshot
+
+    @staticmethod
+    def _anti_bias_snapshot(final_state: dict[str, Any]) -> dict[str, Any]:
+        researchability = final_state.get("researchability_assessment") or {}
+        falsification = final_state.get("falsification_audit") or {}
+        decision = final_state.get("final_trade_decision", "")
+        if not isinstance(researchability, dict):
+            researchability = {}
+        if not isinstance(falsification, dict):
+            falsification = {}
+        if not isinstance(decision, str):
+            decision = ""
+        if not researchability and not falsification:
+            return {}
+
+        def confidence(label: str) -> dict[str, str | None]:
+            level = re.search(
+                rf"\*\*{label} Confidence\*\*:\s*([^\n]+)",
+                decision,
+                re.IGNORECASE,
+            )
+            reason = re.search(
+                rf"\*\*{label} Confidence Reason\*\*:\s*([^\n]+)",
+                decision,
+                re.IGNORECASE,
+            )
+            return {
+                "level": level.group(1).strip() if level else None,
+                "reason": reason.group(1).strip() if reason else None,
+            }
+
+        return {
+            "information_grade": researchability.get("information_grade"),
+            "research_limitations": researchability.get("research_limitations", []),
+            "strongest_counter_thesis": falsification.get(
+                "strongest_counter_thesis"
+            ),
+            "falsification_triggers": falsification.get(
+                "falsification_triggers", []
+            ),
+            "confidence": {
+                "data": confidence("Data"),
+                "thesis": confidence("Thesis"),
+                "execution": confidence("Execution"),
+            },
+        }
 
     def fundamentals_fresh(
         self,
@@ -164,6 +223,17 @@ class TickerMemoryStore:
             if historical_close is not None
             else ""
         )
+        anti_bias = snapshot.get("anti_bias") or {}
+        audit_context = ""
+        if anti_bias:
+            audit_context = (
+                "\nPrevious anti-bias audit:\n"
+                f"- Information grade: {anti_bias.get('information_grade') or 'unknown'}\n"
+                f"- Strongest counter-thesis: "
+                f"{anti_bias.get('strongest_counter_thesis') or 'not recorded'}\n"
+                f"- Falsification triggers: "
+                f"{'; '.join(anti_bias.get('falsification_triggers') or []) or 'not recorded'}\n"
+            )
         return (
             "HISTORICAL SAME-TICKER MEMORY (lower priority than the current market snapshot).\n"
             f"Previous analysis date: {previous_date}\n"
@@ -172,6 +242,7 @@ class TickerMemoryStore:
             "inside the block below describes the previous analysis only. Never reuse "
             "it as a current fact. Recalculate any price-dependent conclusion from the "
             "authoritative current market snapshot and explicitly explain material changes.\n"
+            f"{audit_context}"
             "<historical_decision>\n"
             f"{decision}\n"
             "</historical_decision>"

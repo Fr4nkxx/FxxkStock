@@ -66,6 +66,153 @@ class TraderAction(str, Enum):
 
 
 # ---------------------------------------------------------------------------
+# Anti-bias audit
+# ---------------------------------------------------------------------------
+
+
+class InformationGrade(str, Enum):
+    """How well public evidence supports AI-assisted research."""
+
+    A = "A"
+    B = "B"
+    C = "C"
+
+
+class ConfidenceLevel(str, Enum):
+    """Deliberately coarse confidence scale to avoid false precision."""
+
+    LOW = "Low"
+    MEDIUM = "Medium"
+    HIGH = "High"
+
+
+class ResearchabilityAssessment(BaseModel):
+    """Pre-debate assessment of evidence breadth and research limitations."""
+
+    information_grade: InformationGrade = Field(
+        description="A = information rich, B = moderate/inference required, C = sparse.",
+    )
+    source_diversity: ConfidenceLevel = Field(
+        description="Diversity and independence of the available evidence sources.",
+    )
+    consensus_risk: ConfidenceLevel = Field(
+        description="Risk that abundant but homogeneous public information anchors the analysis.",
+    )
+    critical_missing_data: list[str] = Field(
+        default_factory=list,
+        description="Material missing facts that could change the investment conclusion.",
+    )
+    inferred_claims: list[str] = Field(
+        default_factory=list,
+        description="Important claims that are inferred rather than directly observed.",
+    )
+    research_limitations: list[str] = Field(
+        default_factory=list,
+        description="Concrete limitations of this AI research run.",
+    )
+    recommended_posture: str = Field(
+        description="How conservatively downstream agents should use the evidence.",
+    )
+
+    @field_validator("information_grade", mode="before")
+    @classmethod
+    def normalize_information_grade(cls, value):
+        return value.strip().upper() if isinstance(value, str) else value
+
+    @field_validator("source_diversity", "consensus_risk", mode="before")
+    @classmethod
+    def normalize_confidence_levels(cls, value):
+        return value.strip().capitalize() if isinstance(value, str) else value
+
+
+def render_researchability(assessment: ResearchabilityAssessment) -> str:
+    def bullets(items: list[str]) -> str:
+        return "\n".join(f"- {item}" for item in items) or "- None identified"
+
+    return "\n".join([
+        "# 可研究性评估 / Researchability Assessment",
+        "",
+        f"**Information Grade**: {assessment.information_grade.value}",
+        "",
+        f"**Source Diversity**: {assessment.source_diversity.value}",
+        "",
+        f"**Consensus Risk**: {assessment.consensus_risk.value}",
+        "",
+        "## Critical Missing Data",
+        bullets(assessment.critical_missing_data),
+        "",
+        "## Inferred Claims",
+        bullets(assessment.inferred_claims),
+        "",
+        "## Research Limitations",
+        bullets(assessment.research_limitations),
+        "",
+        f"## Recommended Posture\n{assessment.recommended_posture}",
+    ])
+
+
+class FalsificationAudit(BaseModel):
+    """Independent challenge to the Research Manager's initial plan."""
+
+    strongest_counter_thesis: str = Field(
+        description="The strongest coherent case against the initial recommendation.",
+    )
+    conflicting_or_ignored_evidence: list[str] = Field(default_factory=list)
+    hidden_assumptions: list[str] = Field(default_factory=list)
+    bias_flags: list[str] = Field(
+        default_factory=list,
+        description="Relevant biases such as confirmation, anchoring, recency, or narrative bias.",
+    )
+    falsification_triggers: list[str] = Field(
+        default_factory=list,
+        description="Observable future facts that would invalidate the thesis.",
+    )
+    critical_findings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Only severe issues: material data conflict, unsupported decisive claim, "
+            "ignored strong counterevidence, or asset/strategy mismatch."
+        ),
+    )
+    requires_revision: bool = Field(
+        description="True when critical findings require one Research Manager revision.",
+    )
+    revision_instructions: list[str] = Field(default_factory=list)
+
+
+def render_falsification_audit(audit: FalsificationAudit) -> str:
+    def bullets(items: list[str]) -> str:
+        return "\n".join(f"- {item}" for item in items) or "- None identified"
+
+    return "\n".join([
+        "# 证伪审计 / Falsification Audit",
+        "",
+        f"**Requires Revision**: {'Yes' if audit.requires_revision else 'No'}",
+        "",
+        "## Strongest Counter-Thesis",
+        audit.strongest_counter_thesis,
+        "",
+        "## Conflicting or Ignored Evidence",
+        bullets(audit.conflicting_or_ignored_evidence),
+        "",
+        "## Hidden Assumptions",
+        bullets(audit.hidden_assumptions),
+        "",
+        "## Bias Flags",
+        bullets(audit.bias_flags),
+        "",
+        "## Falsification Triggers",
+        bullets(audit.falsification_triggers),
+        "",
+        "## Critical Findings",
+        bullets(audit.critical_findings),
+        "",
+        "## Revision Instructions",
+        bullets(audit.revision_instructions),
+    ])
+
+
+# ---------------------------------------------------------------------------
 # Research Manager
 # ---------------------------------------------------------------------------
 
@@ -221,11 +368,39 @@ class PortfolioDecision(BaseModel):
         default=None,
         description="Optional recommended holding period, e.g. '3-6 months'.",
     )
+    data_confidence: ConfidenceLevel = Field(
+        description="Confidence in data completeness, freshness, and source independence.",
+    )
+    data_confidence_reason: str = Field(
+        description="One sentence explaining the data confidence level.",
+    )
+    thesis_confidence: ConfidenceLevel = Field(
+        description="Confidence that the investment thesis survives the falsification audit.",
+    )
+    thesis_confidence_reason: str = Field(
+        description="One sentence explaining the thesis confidence level.",
+    )
+    execution_confidence: ConfidenceLevel = Field(
+        description="Confidence in the action, price levels, sizing, and risk triggers.",
+    )
+    execution_confidence_reason: str = Field(
+        description="One sentence explaining the execution confidence level.",
+    )
 
     @field_validator("price_target", mode="before")
     @classmethod
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
+
+    @field_validator(
+        "data_confidence",
+        "thesis_confidence",
+        "execution_confidence",
+        mode="before",
+    )
+    @classmethod
+    def normalize_confidence_levels(cls, value):
+        return value.strip().capitalize() if isinstance(value, str) else value
 
 
 def render_pm_decision(decision: PortfolioDecision) -> str:
@@ -247,6 +422,20 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
         parts.extend(["", f"**Price Target**: {decision.price_target}"])
     if decision.time_horizon:
         parts.extend(["", f"**Time Horizon**: {decision.time_horizon}"])
+    parts.extend([
+        "",
+        f"**Data Confidence**: {decision.data_confidence.value}",
+        "",
+        f"**Data Confidence Reason**: {decision.data_confidence_reason}",
+        "",
+        f"**Thesis Confidence**: {decision.thesis_confidence.value}",
+        "",
+        f"**Thesis Confidence Reason**: {decision.thesis_confidence_reason}",
+        "",
+        f"**Execution Confidence**: {decision.execution_confidence.value}",
+        "",
+        f"**Execution Confidence Reason**: {decision.execution_confidence_reason}",
+    ])
     return "\n".join(parts)
 
 

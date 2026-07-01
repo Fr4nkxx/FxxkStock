@@ -17,6 +17,7 @@ from fxxkstock.agents.managers.research_manager import create_research_manager
 from fxxkstock.agents.schemas import (
     PortfolioDecision,
     PortfolioRating,
+    ConfidenceLevel,
     ResearchPlan,
     SentimentBand,
     SentimentReport,
@@ -94,6 +95,12 @@ class TestNullishFloatCoercion:
             executive_summary="s",
             investment_thesis="t",
             price_target="N/A",
+            data_confidence=ConfidenceLevel.HIGH,
+            data_confidence_reason="Fresh data.",
+            thesis_confidence=ConfidenceLevel.MEDIUM,
+            thesis_confidence_reason="Some uncertainty.",
+            execution_confidence=ConfidenceLevel.LOW,
+            execution_confidence_reason="No entry trigger.",
         )
         assert d.price_target is None
 

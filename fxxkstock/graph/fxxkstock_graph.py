@@ -629,6 +629,9 @@ class FxxKStockGraph:
             "sentiment_report": final_state["sentiment_report"],
             "news_report": final_state["news_report"],
             "fundamentals_report": final_state["fundamentals_report"],
+            "researchability_assessment": final_state.get(
+                "researchability_assessment", {}
+            ),
             "investment_debate_state": {
                 "bull_history": final_state["investment_debate_state"]["bull_history"],
                 "bear_history": final_state["investment_debate_state"]["bear_history"],
@@ -649,6 +652,10 @@ class FxxKStockGraph:
                 "judge_decision": final_state["risk_debate_state"]["judge_decision"],
             },
             "investment_plan": final_state["investment_plan"],
+            "initial_investment_plan": final_state.get(
+                "initial_investment_plan", ""
+            ),
+            "falsification_audit": final_state.get("falsification_audit", {}),
             "final_trade_decision": final_state["final_trade_decision"],
         }
 

@@ -21,6 +21,9 @@ def create_research_manager(llm):
         history = state["investment_debate_state"].get("history", "")
 
         investment_debate_state = state["investment_debate_state"]
+        researchability = (state.get("researchability_assessment") or {}).get(
+            "markdown", ""
+        )
 
         prompt = f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
 
@@ -40,7 +43,13 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
 ---
 
 **Debate History:**
-{history}""" + get_report_instructions()
+{history}
+
+**AI Researchability Assessment:**
+{researchability}
+
+Calibrate certainty to the assessment, but do not treat sparse information as
+automatic bearish evidence.""" + get_report_instructions()
 
         investment_plan = invoke_structured_or_freetext(
             structured_llm,

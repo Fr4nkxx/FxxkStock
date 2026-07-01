@@ -137,12 +137,29 @@ def read_report_sections(report_dir: Path) -> dict[str, str]:
         _read_text(report_dir / "1_analysts" / "news.md"),
         _read_text(report_dir / "1_analysts" / "sentiment.md"),
     ]
+    audit_parts = [
+        _read_text(report_dir / "6_audit" / "researchability.md"),
+        _read_text(report_dir / "6_audit" / "falsification.md"),
+    ]
     return {
         "summary": summary,
         "thesis": "\n\n---\n\n".join(part for part in thesis_parts if part),
         "risks": "\n\n---\n\n".join(part for part in risk_parts if part),
         "data": "\n\n---\n\n".join(part for part in data_parts if part),
+        "audit": "\n\n---\n\n".join(part for part in audit_parts if part),
     }
+
+
+def read_audit_metadata(report_dir: Path) -> dict[str, Any]:
+    path = report_dir / "6_audit" / "audit.json"
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        logger.warning("Ignoring invalid anti-bias audit file: %s", path)
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def read_core_insights(report_dir: Path) -> list[str]:
@@ -229,6 +246,7 @@ def get_historical_report(report_id: str, reports_root: Path | None = None) -> d
         "decision": _extract_decision(markdown),
         "markdown": markdown,
         "sections": read_report_sections(report_dir),
+        "audit": read_audit_metadata(report_dir),
         "core_insights": read_core_insights(report_dir),
         "report_dir": str(report_dir),
     }
@@ -301,28 +319,6 @@ def get_stock_overview(
         )
         closes = frame["Close"].dropna()
         if not closes.empty:
-            last = float(closes.iloc[-1])
-            previous = float(closes.iloc[-2]) if len(closes) > 1 else None
-            quote["last_price"] = last
-            quote["previous_close"] = previous
-            if previous not in (None, 0):
-                quote["change"] = last - previous
-                quote["change_percent"] = (last - previous) / previous * 100
-            if "Volume" in frame and len(frame["Volume"]):
-                volume = frame["Volume"].iloc[-1]
-                quote["volume"] = int(volume) if volume == volume else None
-            latest = frame.iloc[-1]
-            for source, target in (("Open", "open"), ("High", "high"), ("Low", "low")):
-                value = latest.get(source)
-                quote[target] = float(value) if value == value else None
-            if quote["last_price"] is not None and quote["volume"] is not None:
-                quote["turnover"] = quote["last_price"] * quote["volume"]
-            index_value = closes.index[-1]
-            quote["as_of"] = (
-                index_value.isoformat()
-                if hasattr(index_value, "isoformat")
-                else str(index_value)
-            )
             stride = max(1, len(closes) // 140)
             sampled = closes.iloc[::stride]
             if sampled.index[-1] != closes.index[-1]:
@@ -334,6 +330,65 @@ def get_stock_overview(
                 }
                 for index, value in sampled.items()
             ]
+
+        # Quote cards must use the complete daily bar. The chart may use 5-minute
+        # bars, whose final row represents only the last interval rather than the
+        # session's open/high/low/volume.
+        daily_frame = stock.history(
+            period="5d",
+            interval="1d",
+            auto_adjust=False,
+        )
+        daily_closes = daily_frame["Close"].dropna()
+        if not daily_closes.empty:
+            latest_index = daily_closes.index[-1]
+            latest = daily_frame.loc[latest_index]
+            last = float(daily_closes.iloc[-1])
+            previous = (
+                float(daily_closes.iloc[-2]) if len(daily_closes) > 1 else None
+            )
+            quote["last_price"] = last
+            quote["previous_close"] = previous
+            if previous not in (None, 0):
+                quote["change"] = last - previous
+                quote["change_percent"] = (last - previous) / previous * 100
+            for source, target in (
+                ("Open", "open"),
+                ("High", "high"),
+                ("Low", "low"),
+            ):
+                value = latest.get(source)
+                quote[target] = (
+                    float(value)
+                    if value is not None and pd.notna(value)
+                    else None
+                )
+            volume = latest.get("Volume")
+            quote["volume"] = (
+                int(volume)
+                if volume is not None and pd.notna(volume)
+                else None
+            )
+            if quote["last_price"] is not None and quote["volume"] is not None:
+                quote["turnover"] = quote["last_price"] * quote["volume"]
+            quote["as_of"] = (
+                latest_index.date().isoformat()
+                if hasattr(latest_index, "date")
+                else str(latest_index)
+            )
+        elif not closes.empty:
+            # Degraded fallback: aggregate all available intraday rows instead
+            # of exposing the final five-minute candle as a daily quote.
+            quote["last_price"] = float(closes.iloc[-1])
+            first_open = frame["Open"].dropna() if "Open" in frame else closes
+            highs = frame["High"].dropna() if "High" in frame else closes
+            lows = frame["Low"].dropna() if "Low" in frame else closes
+            quote["open"] = float(first_open.iloc[0])
+            quote["high"] = float(highs.max())
+            quote["low"] = float(lows.min())
+            if "Volume" in frame:
+                quote["volume"] = int(frame["Volume"].fillna(0).sum())
+            quote["as_of"] = closes.index[-1].isoformat()
         try:
             info = stock.info or {}
         except Exception:

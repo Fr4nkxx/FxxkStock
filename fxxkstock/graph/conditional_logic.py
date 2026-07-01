@@ -71,3 +71,12 @@ class ConditionalLogic:
         if state["risk_debate_state"]["latest_speaker"].startswith("Conservative"):
             return "Neutral Analyst"
         return "Aggressive Analyst"
+
+    def should_revise_research(self, state: AgentState) -> str:
+        """Route through at most one revision node after falsification."""
+        audit = state.get("falsification_audit") or {}
+        return (
+            "Research Manager Revision"
+            if audit.get("requires_revision") is True
+            else "Trader"
+        )

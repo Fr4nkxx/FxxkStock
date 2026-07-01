@@ -1,6 +1,7 @@
 """Report parity: the shared writer produces the report tree for the CLI and the
 programmatic API alike (#1037)."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -31,6 +32,41 @@ def test_write_report_tree_creates_files(tmp_path):
     complete = out.read_text()
     assert "Trading Analysis Report: AAPL" in complete
     assert "MKT" in complete and "PM DECISION" in complete
+
+
+@pytest.mark.unit
+def test_write_report_tree_persists_anti_bias_audit(tmp_path):
+    state = _state()
+    state.update(
+        {
+            "researchability_assessment": {
+                "status": "available",
+                "information_grade": "B",
+                "markdown": "**Information Grade**: B",
+            },
+            "falsification_audit": {
+                "status": "available",
+                "requires_revision": False,
+                "falsification_triggers": ["Revenue misses"],
+                "markdown": "**Requires Revision**: No",
+            },
+            "initial_investment_plan": "INITIAL PLAN",
+            "final_trade_decision": (
+                "**Data Confidence**: High\n"
+                "**Data Confidence Reason**: Fresh.\n"
+                "**Thesis Confidence**: Medium\n"
+                "**Thesis Confidence Reason**: Some uncertainty.\n"
+                "**Execution Confidence**: Low\n"
+                "**Execution Confidence Reason**: No trigger."
+            ),
+        }
+    )
+    out = write_report_tree(state, "AAPL", tmp_path)
+    payload = json.loads((tmp_path / "6_audit" / "audit.json").read_text())
+    assert payload["researchability"]["information_grade"] == "B"
+    assert payload["confidence"]["execution"]["level"] == "Low"
+    assert (tmp_path / "6_audit" / "research_manager_initial.md").read_text() == "INITIAL PLAN"
+    assert "Anti-Bias Audit" in out.read_text()
 
 
 @pytest.mark.unit

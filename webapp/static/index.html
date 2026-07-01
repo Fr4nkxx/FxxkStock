@@ -82,7 +82,6 @@
     .stock-item-top { font-weight: 650; }
     .stock-item-bottom { margin-top: 6px; color: var(--muted); font-size: 11px; }
     .stock-count { margin-left: auto; }
-    .stock-date { margin-left: auto; }
     .empty-list { padding: 18px 9px; color: var(--muted); line-height: 1.5; }
     .badge {
       display: inline-flex; align-items: center; min-height: 18px; padding: 1px 6px;
@@ -148,13 +147,6 @@
     .quote-cell:nth-child(2n) { border-right: 0; }
     .quote-cell span { color: var(--muted); }
     .quote-cell strong { font-weight: 560; text-align: right; }
-    .profile-strip {
-      min-height: 69px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
-      border-top: 1px solid var(--line);
-    }
-    .profile-cell { padding: 12px 18px; min-width: 0; }
-    .profile-cell span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; }
-    .profile-cell strong { display: block; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
 
     /* Analysis progress */
     .analysis-strip {
@@ -289,7 +281,6 @@
       .market-grid { grid-template-columns: 1fr; }
       .price-block, .chart-block { border-right: 0; border-bottom: 1px solid var(--line); }
       .quote-grid { grid-template-columns: 1fr 1fr; }
-      .profile-strip { grid-template-columns: 1fr 1fr; }
       .analysis-strip { grid-template-columns: auto 1fr auto; gap: 10px; padding: 10px 12px; }
       .analysis-state, .debug-link { grid-column: span 3; }
       .report-toolbar { height: auto; min-height: 52px; flex-wrap: wrap; gap: 5px; padding: 8px 12px; }
@@ -306,7 +297,7 @@
       .instrument-title h1 { font-size: 16px; }
       .action-btn span { display: none; }
       .market-grid { min-height: 0; }
-      .profile-strip, .quote-grid { grid-template-columns: 1fr 1fr; }
+      .quote-grid { grid-template-columns: 1fr 1fr; }
       .config-grid { grid-template-columns: 1fr; }
       .field.wide { grid-column: auto; }
       .report-actions { width: 100%; margin-left: 0; }
@@ -353,7 +344,6 @@
             </div>
             <div class="quote-grid" id="quoteGrid"></div>
           </div>
-          <div class="profile-strip" id="profileStrip"></div>
         </section>
 
         <section class="analysis-strip">
@@ -372,6 +362,7 @@
               <button class="report-tab" data-report-tab="thesis">投资逻辑</button>
               <button class="report-tab" data-report-tab="risks">风险因素</button>
               <button class="report-tab" data-report-tab="data">数据依据</button>
+              <button class="report-tab" data-report-tab="audit">反偏见审计</button>
               <button class="report-tab" data-report-tab="history">历史对比</button>
             </div>
             <div class="report-actions">
@@ -387,6 +378,10 @@
                 <div class="decision-row"><span>目标价</span><strong id="decisionTarget">-</strong></div>
                 <div class="decision-row"><span>时间范围</span><strong id="decisionHorizon">-</strong></div>
                 <div class="decision-row"><span>最新版本</span><strong id="decisionDate">-</strong></div>
+                <div class="decision-row"><span>信息等级</span><strong id="decisionInfoGrade">-</strong></div>
+                <div class="decision-row"><span>数据置信度</span><strong id="decisionDataConfidence">-</strong></div>
+                <div class="decision-row"><span>论点置信度</span><strong id="decisionThesisConfidence">-</strong></div>
+                <div class="decision-row"><span>执行置信度</span><strong id="decisionExecutionConfidence">-</strong></div>
               </div>
               <div class="decision-note"><h3>核心观点</h3><ul id="decisionNote"><li>完成一次分析后，这里将显示投资组合经理的最终结论。</li></ul></div>
             </aside>
@@ -435,7 +430,7 @@
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const REPORT_TABS = ["summary", "thesis", "risks", "data", "history"];
+    const REPORT_TABS = ["summary", "thesis", "risks", "data", "audit", "history"];
     const RATING_LABELS = {
       BUY: "买入", OVERWEIGHT: "增持", HOLD: "持有",
       UNDERWEIGHT: "减持", SELL: "卖出",
@@ -497,6 +492,11 @@
       if (value == null) return "-";
       return `${currencyPrefix(currency)}${formatNumber(value, 3)}`;
     }
+    function confidenceLabel(value) {
+      return { low: "低", medium: "中", high: "高" }[
+        String(value || "").toLowerCase()
+      ] || value || "-";
+    }
     function openModal(id) { $(id).classList.add("open"); }
     function closeModal(id) { $(id).classList.remove("open"); }
     function logEvent(data) {
@@ -545,7 +545,7 @@
       $("stockList").innerHTML = groups.length ? groups.map((group) => `
         <button class="stock-item ${group.ticker === selectedTicker ? "active" : ""}" data-ticker="${escapeHtml(group.ticker)}">
           <div class="stock-item-top"><span>${escapeHtml(group.ticker)}</span>${group.activeRun ? '<span class="badge blue">分析中</span>' : group.latest.decision ? `<span class="badge ${decisionTone(group.latest.decision)}">${escapeHtml(RATING_LABELS[group.latest.decision] || group.latest.decision)}</span>` : ""}<span class="stock-count">${group.reports.length}</span></div>
-          <div class="stock-item-bottom"><span title="${escapeHtml(group.name || group.ticker)}">${escapeHtml(group.name || group.ticker)}</span><span class="stock-date">${escapeHtml(formatDate(group.latest.created_at).slice(0, 10))}</span></div>
+          <div class="stock-item-bottom"><span title="${escapeHtml(group.name || group.ticker)}">${escapeHtml(group.name || group.ticker)}</span></div>
         </button>`).join("") : '<div class="empty-list">没有匹配的分析标的</div>';
       document.querySelectorAll(".stock-item").forEach((button) =>
         button.addEventListener("click", () => selectStock(button.dataset.ticker))
@@ -580,7 +580,6 @@
     function renderOverview(overview) {
       currentOverview = overview;
       const quote = overview.quote || {};
-      const details = overview.details || {};
       const group = stockGroups.find((item) => item.ticker === overview.ticker);
       if (group && overview.name && overview.name !== overview.ticker && group.name !== overview.name) {
         group.name = overview.name;
@@ -595,14 +594,6 @@
       $("priceChange").textContent = quote.change == null ? "行情数据不可用" : `${change >= 0 ? "+" : ""}${formatNumber(change, 3)}  ${changePercent >= 0 ? "+" : ""}${formatNumber(changePercent, 2)}%`;
       $("quoteTime").textContent = quote.as_of ? formatDate(quote.as_of) : "未取得最新行情";
       $("quoteGrid").innerHTML = quoteCells(overview).map(([label, value]) => `<div class="quote-cell"><span>${label}</span><strong>${value}</strong></div>`).join("");
-      const profile = [
-        ["类型", details.instrument_type || details.category || details.quote_type || "证券"],
-        ["跟踪指数", details.tracking_index || "-"],
-        ["管理人", details.fund_family || "-"],
-        ["成立日期", details.inception_date || "-"],
-        ["交易所", overview.exchange || overview.market_region || "-"],
-      ];
-      $("profileStrip").innerHTML = profile.map(([label, value]) => `<div class="profile-cell"><span>${label}</span><strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong></div>`).join("");
       drawChart(overview.chart || []);
     }
     function drawChart(points) {
@@ -723,13 +714,23 @@
       $("decisionTarget").textContent = parseField(summary, "Price Target");
       $("decisionHorizon").textContent = parseField(summary, "Time Horizon");
       $("decisionDate").textContent = data.created_at ? formatDate(data.created_at).slice(0, 16) : new Date().toLocaleString().slice(0, 16);
+      const audit = data.audit || {};
+      $("decisionInfoGrade").textContent = audit.researchability?.information_grade
+        || (audit.researchability?.status === "unavailable" ? "未评估" : "-");
+      $("decisionDataConfidence").textContent = confidenceLabel(audit.confidence?.data?.level);
+      $("decisionThesisConfidence").textContent = confidenceLabel(audit.confidence?.thesis?.level);
+      $("decisionExecutionConfidence").textContent = confidenceLabel(audit.confidence?.execution?.level);
       renderCorePoints(summary, data.core_insights);
     }
     function clearReport() {
       currentReport = { markdown: "", sections: {} };
       $("reportContent").innerHTML = '<div class="empty-report">该股票还没有分析报告</div>';
       $("decisionRating").textContent = "等待报告";
-      ["decisionLabel", "decisionTarget", "decisionHorizon", "decisionDate"].forEach((id) => $(id).textContent = "-");
+      [
+        "decisionLabel", "decisionTarget", "decisionHorizon", "decisionDate",
+        "decisionInfoGrade", "decisionDataConfidence",
+        "decisionThesisConfidence", "decisionExecutionConfidence",
+      ].forEach((id) => $(id).textContent = "-");
       renderCorePoints("");
     }
     async function loadReport(reportId) {
@@ -759,7 +760,10 @@
         return;
       }
       const content = currentReport.sections?.[tab] || (tab === "summary" ? currentReport.markdown : "");
-      $("reportContent").innerHTML = content ? renderMarkdown(content) : '<div class="empty-report">该章节暂无内容</div>';
+      const empty = tab === "audit"
+        ? "该版本未启用反偏见审计"
+        : "该章节暂无内容";
+      $("reportContent").innerHTML = content ? renderMarkdown(content) : `<div class="empty-report">${empty}</div>`;
     }
 
     function fillModelSelect(select, options) {
@@ -823,6 +827,7 @@
       if (value.includes("fundamental")) return "fundamentals";
       if (value.includes("news") || value.includes("sentiment")) return "news_sentiment";
       if (value.includes("bull") || value.includes("bear") || value.includes("research")) return "research";
+      if (value.includes("falsification") || value.includes("audit")) return "research";
       if (value.includes("trader")) return "trading";
       if (value.includes("risk") || value.includes("portfolio") || value.includes("final")) return "risk_portfolio";
       return null;
@@ -857,10 +862,15 @@
     async function handleRunEvent(run, data) {
       if (data.type === "heartbeat") return;
       logEvent(data);
-      if (data.type === "report_section") {
-        const stage = progressStage(data.section || data.label);
-        if (stage) completedSections.add(stage);
-        setProgress(Math.min(92, 8 + completedSections.size / 6 * 84));
+        if (data.type === "report_section") {
+          const stage = progressStage(data.section || data.label);
+          if (stage) completedSections.add(stage);
+          const auditText = String(data.section || "").includes("researchability")
+            ? "正在评估信息可研究性…"
+            : String(data.section || "").includes("falsification")
+              ? "正在执行证伪审计…"
+              : null;
+          setProgress(Math.min(92, 8 + completedSections.size / 6 * 84), auditText);
       }
       if (data.type === "memory_loaded") {
         setProgress(7, data.has_memory ? "已加载股票记忆" : "首次完整分析");

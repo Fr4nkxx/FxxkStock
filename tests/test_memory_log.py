@@ -94,6 +94,12 @@ def _structured_pm_llm(captured: dict, decision: PortfolioDecision | None = None
             rating=PortfolioRating.HOLD,
             executive_summary="Hold the position; await catalyst.",
             investment_thesis="Balanced view; neither side carried the debate.",
+            data_confidence="High",
+            data_confidence_reason="Fresh evidence.",
+            thesis_confidence="Medium",
+            thesis_confidence_reason="Balanced debate.",
+            execution_confidence="Low",
+            execution_confidence_reason="No trigger.",
         )
     structured = MagicMock()
     structured.invoke.side_effect = lambda prompt: (
@@ -729,6 +735,12 @@ class TestPortfolioManagerInjection:
             investment_thesis="AI capex cycle remains intact; institutional flows constructive.",
             price_target=215.0,
             time_horizon="3-6 months",
+            data_confidence="High",
+            data_confidence_reason="Fresh evidence.",
+            thesis_confidence="Medium",
+            thesis_confidence_reason="Audit found residual uncertainty.",
+            execution_confidence="High",
+            execution_confidence_reason="Levels are actionable.",
         )
         llm = _structured_pm_llm(captured, decision)
         pm_node = create_portfolio_manager(llm)
@@ -739,6 +751,9 @@ class TestPortfolioManagerInjection:
         assert "**Investment Thesis**: AI capex cycle" in md
         assert "**Price Target**: 215.0" in md
         assert "**Time Horizon**: 3-6 months" in md
+        assert "**Data Confidence**: High" in md
+        assert "**Thesis Confidence**: Medium" in md
+        assert "**Execution Confidence**: High" in md
 
     def test_pm_falls_back_to_freetext_when_structured_unavailable(self):
         """If a provider does not support with_structured_output, the agent

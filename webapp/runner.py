@@ -270,6 +270,23 @@ def _detect_report_sections(chunk: dict[str, Any], seen: set[str]) -> list[tuple
         seen.add("trader")
         found.append(("trader", "Trader"))
 
+    if chunk.get("researchability_assessment") and "researchability" not in seen:
+        seen.add("researchability")
+        found.append(("researchability", "Researchability Assessor"))
+
+    if chunk.get("falsification_audit") and "falsification_audit" not in seen:
+        seen.add("falsification_audit")
+        found.append(("falsification_audit", "Falsification Auditor"))
+
+    if (
+        chunk.get("initial_investment_plan")
+        and chunk.get("investment_plan")
+        and chunk.get("investment_plan") != chunk.get("initial_investment_plan")
+        and "research_revision" not in seen
+    ):
+        seen.add("research_revision")
+        found.append(("research_revision", "Research Manager Revision"))
+
     risk = chunk.get("risk_debate_state") or {}
     if risk.get("aggressive_history") and "risk_aggressive" not in seen:
         seen.add("risk_aggressive")
@@ -468,8 +485,9 @@ def run_analysis(state: RunState, params: RunParams) -> None:
             },
         )
     finally:
-        if graph is not None:
-            browser_status = graph.close_managed_browser()
+        close_browser = getattr(graph, "close_managed_browser", None)
+        if callable(close_browser):
+            browser_status = close_browser()
             if browser_status is not None:
                 _emit(state, {"type": "browser_status", **browser_status})
         _write_debug_log(state)

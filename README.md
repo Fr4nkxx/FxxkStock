@@ -26,6 +26,7 @@
 | 多智能体协作 | 市场、情绪、新闻、基本面、研究、交易和风险智能体分工协作 |
 | 多空辩论 | Bull 与 Bear Researcher 进行多轮论证，由 Research Manager 汇总 |
 | 风险评审 | 激进、中性、保守三类风险角色审查交易计划 |
+| 结构化反偏见 | 可研究性评级、独立证伪审计、条件性单次修正及三维置信度 |
 | 中国市场适配 | 支持 `.SS`、`.SZ`、`.HK` 及常见中国 ADR |
 | 中文数据源 | 东方财富、雪球、NGA 大时代、巨潮资讯及中文宏观新闻 |
 | 行情事实校验 | 对标的身份、OHLCV、指标日期和数据窗口进行验证 |
@@ -48,20 +49,19 @@ flowchart LR
     DATA --> NEWS["新闻分析师<br/>公司、宏观、事件"]
     DATA --> FUND["基本面分析师<br/>财务、估值、质量"]
 
-    MARKET --> BULL["多头研究员"]
-    SENTIMENT --> BULL
-    NEWS --> BULL
-    FUND --> BULL
+    FUND --> AUDIT0["可研究性评估"]
+    MARKET --> AUDIT0
+    SENTIMENT --> AUDIT0
+    NEWS --> AUDIT0
+    AUDIT0 --> BULL["多头研究员"]
+    BULL <--> |多轮辩论| BEAR["空头研究员"]
 
-    MARKET --> BEAR["空头研究员"]
-    SENTIMENT --> BEAR
-    NEWS --> BEAR
-    FUND --> BEAR
-
-    BULL <--> |多轮辩论| BEAR
     BULL --> RM["研究经理"]
     BEAR --> RM
-    RM --> TRADER["交易员"]
+    RM --> FALSIFY["独立证伪审计"]
+    FALSIFY -->|"重大问题：修正一次"| RM2["研究经理修正版"]
+    FALSIFY -->|"通过"| TRADER["交易员"]
+    RM2 --> TRADER
 
     TRADER --> AGG["激进风险分析师"]
     TRADER --> NEU["中性风险分析师"]

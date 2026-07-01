@@ -37,6 +37,12 @@ def create_portfolio_manager(llm):
         research_plan = state["investment_plan"]
         trader_plan = state["trader_investment_plan"]
         position_context = render_position_context(state.get("position_context"))
+        researchability = (state.get("researchability_assessment") or {}).get(
+            "markdown", ""
+        )
+        falsification_audit = (state.get("falsification_audit") or {}).get(
+            "markdown", ""
+        )
 
         past_context = state.get("past_context", "")
         lessons_line = (
@@ -68,9 +74,21 @@ def create_portfolio_manager(llm):
 **Risk Analysts Debate History:**
 {history}
 
+**AI Researchability Assessment:**
+{researchability}
+
+**Independent Falsification Audit:**
+{falsification_audit}
+
 ---
 
 Be decisive and ground every conclusion in specific evidence from the analysts.
+Assess data, thesis, and execution confidence independently; one high confidence
+dimension must never inflate another.
+For free-text fallback, include exactly these fields with Low/Medium/High values:
+**Data Confidence**, **Data Confidence Reason**, **Thesis Confidence**,
+**Thesis Confidence Reason**, **Execution Confidence**, and
+**Execution Confidence Reason**.
 Use cost basis only for risk management; never anchor the decision on breaking even.
 Never describe a market low, technical level, prior-report price, or proposed entry
 as the user's cost basis. If you mention the user's cost or P/L, copy only the exact

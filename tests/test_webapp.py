@@ -307,6 +307,8 @@ def test_list_historical_reports(tmp_path):
     detail = get_historical_report("600353.SS_20260627_141703", tmp_path)
     assert detail["available"] is True
     assert "600353.SS" in detail["markdown"]
+    assert detail["audit"] == {}
+    assert detail["sections"]["audit"] == ""
 
 
 @pytest.mark.unit
@@ -371,3 +373,49 @@ def test_stock_overview_groups_reports_and_calculates_change(tmp_path):
     assert result["quote"]["last_price"] == 10.5
     assert result["quote"]["change_percent"] == pytest.approx(5.0)
     assert len(result["reports"]) == 1
+
+
+@pytest.mark.unit
+def test_stock_overview_uses_daily_bar_for_quote_cards(tmp_path):
+    intraday = pd.DataFrame(
+        {
+            "Open": [183.0, 192.5],
+            "High": [190.0, 193.2],
+            "Low": [176.08, 192.5],
+            "Close": [190.0, 193.2],
+            "Volume": [800_000, 110_900],
+        },
+        index=pd.to_datetime(["2026-07-01 09:35", "2026-07-01 14:55"]),
+    )
+    daily = pd.DataFrame(
+        {
+            "Open": [180.0, 183.0],
+            "High": [195.0, 193.4],
+            "Low": [178.0, 176.08],
+            "Close": [192.5, 193.4],
+            "Volume": [1_000_000, 910_900],
+        },
+        index=pd.to_datetime(["2026-06-30", "2026-07-01"]),
+    )
+    from webapp import history
+
+    history._overview_cache.clear()
+    with (
+        patch("webapp.history.resolve_instrument_identity", return_value={
+            "company_name": "利通电子",
+            "exchange": "SHH",
+            "currency": "CNY",
+        }),
+        patch("webapp.history.detect_market_region", return_value="default"),
+        patch("webapp.history.yf.Ticker") as ticker,
+    ):
+        ticker.return_value.history.side_effect = [intraday, daily]
+        ticker.return_value.info = {}
+        result = history.get_stock_overview("603629.SS", tmp_path)
+
+    quote = result["quote"]
+    assert quote["open"] == 183.0
+    assert quote["high"] == 193.4
+    assert quote["low"] == 176.08
+    assert quote["last_price"] == 193.4
+    assert quote["previous_close"] == 192.5

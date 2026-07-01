@@ -23,6 +23,7 @@ from .history import (
     get_historical_report,
     get_stock_overview,
     list_historical_reports,
+    read_audit_metadata,
     read_report_sections,
     read_core_insights,
 )
@@ -215,6 +216,7 @@ def get_report(run_id: str) -> dict[str, Any]:
         "available": bool(markdown),
         "markdown": markdown,
         "sections": read_report_sections(state.report_path),
+        "audit": read_audit_metadata(state.report_path),
         "core_insights": read_core_insights(state.report_path),
         "decision": state.decision,
         "report_dir": str(state.report_path),

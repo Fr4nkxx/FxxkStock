@@ -6,6 +6,8 @@ CLI and ``FxxKStockGraph.save_reports`` both call this, so a headless / API
 run produces the same on-disk report tree a CLI run does.
 """
 
+import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -177,6 +179,73 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
             portfolio_dir.mkdir(exist_ok=True)
             (portfolio_dir / "decision.md").write_text(risk["judge_decision"], encoding="utf-8")
             sections.append(f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n{risk['judge_decision']}")
+
+    # 6. Anti-bias audit
+    researchability = final_state.get("researchability_assessment") or {}
+    falsification = final_state.get("falsification_audit") or {}
+    if researchability or falsification:
+        audit_dir = save_path / "6_audit"
+        audit_dir.mkdir(exist_ok=True)
+        audit_parts = []
+        if researchability.get("markdown"):
+            (audit_dir / "researchability.md").write_text(
+                researchability["markdown"], encoding="utf-8"
+            )
+            audit_parts.append(researchability["markdown"])
+        if falsification.get("markdown"):
+            (audit_dir / "falsification.md").write_text(
+                falsification["markdown"], encoding="utf-8"
+            )
+            audit_parts.append(falsification["markdown"])
+        if final_state.get("initial_investment_plan"):
+            (audit_dir / "research_manager_initial.md").write_text(
+                final_state["initial_investment_plan"], encoding="utf-8"
+            )
+
+        decision_markdown = final_state.get("final_trade_decision", "") or (
+            (final_state.get("risk_debate_state") or {}).get("judge_decision", "")
+        )
+
+        def confidence(label: str) -> dict[str, str | None]:
+            level = re.search(
+                rf"\*\*{re.escape(label)} Confidence\*\*:\s*([^\n]+)",
+                decision_markdown,
+                re.IGNORECASE,
+            )
+            reason = re.search(
+                rf"\*\*{re.escape(label)} Confidence Reason\*\*:\s*([^\n]+)",
+                decision_markdown,
+                re.IGNORECASE,
+            )
+            return {
+                "level": level.group(1).strip() if level else None,
+                "reason": reason.group(1).strip() if reason else None,
+            }
+
+        audit_payload = {
+            "version": 1,
+            "researchability": {
+                key: value for key, value in researchability.items()
+                if key != "markdown"
+            },
+            "falsification": {
+                key: value for key, value in falsification.items()
+                if key != "markdown"
+            },
+            "confidence": {
+                "data": confidence("Data"),
+                "thesis": confidence("Thesis"),
+                "execution": confidence("Execution"),
+            },
+        }
+        (audit_dir / "audit.json").write_text(
+            json.dumps(audit_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        if audit_parts:
+            sections.append(
+                "## VI. Anti-Bias Audit\n\n" + "\n\n---\n\n".join(audit_parts)
+            )
 
     # Write consolidated report
     header = f"# Trading Analysis Report: {ticker}\n\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
