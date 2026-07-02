@@ -6,7 +6,10 @@ from unittest.mock import patch
 import pytest
 
 from fxxkstock.dataflows.cninfo import get_cn_name
-from fxxkstock.dataflows.market_utils import get_security_cn_name
+from fxxkstock.dataflows.market_utils import (
+    _parse_eastmoney_etf_metadata,
+    get_security_cn_name,
+)
 from fxxkstock.graph.fxxkstock_graph import FxxKStockGraph
 
 
@@ -102,6 +105,18 @@ def test_get_security_cn_name_etf_uses_cached_chinese_name(tmp_path):
 
     assert name == "易方达中证人工智能主题ETF"
     mock_fund.assert_not_called()
+
+
+@pytest.mark.unit
+def test_parse_etf_profile_extracts_official_tracking_index():
+    html = """
+    <html><head><title>人工智能ETF易方达(159819)基金净值_天天基金网</title></head>
+    <body><span>跟踪标的：中证人工智能主题指数</span><span>| 年化跟踪误差</span></body>
+    </html>
+    """
+    metadata = _parse_eastmoney_etf_metadata(html, "159819")
+    assert metadata["fund_name"] == "人工智能ETF易方达"
+    assert metadata["tracking_index"] == "中证人工智能主题指数"
 
 
 @pytest.mark.unit

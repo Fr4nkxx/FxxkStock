@@ -253,6 +253,13 @@ NGA data includes actual opening posts and replies, not title-only search result
 7. **Be honest about sparse data** — ADR tickers often lack CN forum coverage; flag confidence accordingly.
 8. **Past sentiment is not predictive.**
 9. **Preserve `Link:` URLs** from news/CNINFO blocks when citing headlines or filings.
+10. **For ETFs, keep sentiment scopes separate** — ETF-name discussions describe
+trading attention/premium/liquidity, while tracking-index and alias discussions
+describe underlying-market direction. Never present index/theme post volume as
+direct ETF discussion, and state which scope supports each conclusion.
+11. **CNINFO coverage is not existence proof** — for an ETF, an empty or
+unindexed CNINFO result means only that this source returned no data. Never infer
+that the ETF has no official announcements or that the instrument does not exist.
 
 ## Output fields
 

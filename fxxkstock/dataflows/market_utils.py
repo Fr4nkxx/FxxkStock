@@ -153,6 +153,7 @@ def to_cninfo_stock_code(ticker: str) -> str:
 
 _EM_QUOTE_URL = "https://push2.eastmoney.com/api/qt/stock/get"
 _EM_FUND_NAME_URL = "https://fundgz.1234567.com.cn/js/{code}.js"
+_EM_FUND_DETAIL_URL = "https://fund.eastmoney.com/{code}.html"
 _EM_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 
@@ -185,6 +186,10 @@ def _is_cn_etf_code(code: str) -> bool:
         re.fullmatch(r"\d{6}", code)
         and code.startswith(("15", "16", "51", "56", "58"))
     )
+
+
+def is_cn_etf(ticker: str) -> bool:
+    return _is_cn_etf_code(ticker.upper().strip().split(".")[0])
 
 
 def _fund_name_cache_path() -> Path:
@@ -250,6 +255,120 @@ def _fetch_eastmoney_fund_cn_name(code: str) -> str | None:
     except Exception as exc:  # noqa: BLE001
         logger.debug("Eastmoney fund name lookup failed for code=%s: %s", code, exc)
     return None
+
+
+def _parse_eastmoney_etf_metadata(html: str, code: str) -> dict[str, object]:
+    """Parse official fund name and tracking target from an Eastmoney fund page."""
+    from parsel import Selector
+
+    selector = Selector(text=html)
+    title = " ".join((selector.css("title::text").get() or "").split())
+    visible = " ".join(
+        " ".join(selector.xpath("//body//text()").getall()).split()
+    )
+    name = ""
+    title_match = re.match(r"(.+?)\s*[（(]\s*" + re.escape(code), title)
+    if title_match:
+        name = title_match.group(1).strip()
+    tracking_match = re.search(
+        r"跟踪标的\s*[：:]\s*([^|｜\s]{2,50}?(?:指数|Index))(?=\s|[|｜])",
+        visible,
+        re.IGNORECASE,
+    )
+    tracking_index = tracking_match.group(1).strip() if tracking_match else None
+    return {
+        "fund_name": name if _contains_chinese(name) else None,
+        "tracking_index": tracking_index,
+    }
+
+
+def _etf_metadata_cache_path() -> Path:
+    return Path(get_config()["data_cache_dir"]) / "security_names" / "cn_etfs.json"
+
+
+def _load_etf_metadata(code: str) -> dict[str, object]:
+    try:
+        payload = json.loads(_etf_metadata_cache_path().read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError, TypeError):
+        return {}
+    item = payload.get(code) if isinstance(payload, dict) else None
+    return item if isinstance(item, dict) else {}
+
+
+def _cache_etf_metadata(code: str, metadata: dict[str, object]) -> None:
+    path = _etf_metadata_cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError, TypeError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        payload[code] = metadata
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        temporary.replace(path)
+    except OSError as exc:
+        logger.debug("Could not cache ETF metadata for %s: %s", code, exc)
+
+
+def _fetch_eastmoney_etf_metadata(code: str) -> dict[str, object]:
+    from urllib.request import Request, urlopen
+
+    url = _EM_FUND_DETAIL_URL.format(code=code)
+    req = Request(url, headers={"User-Agent": _EM_UA, "Accept": "text/html,*/*"})
+    try:
+        with urlopen(req, timeout=12) as response:
+            html = response.read().decode("utf-8", errors="replace")
+        return _parse_eastmoney_etf_metadata(html, code)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Eastmoney ETF metadata lookup failed for %s: %s", code, exc)
+        return {}
+
+
+def _etf_search_aliases(name: str, tracking_index: str | None) -> list[str]:
+    candidates = [name, tracking_index or ""]
+    source = f"{name} {tracking_index or ''}"
+    if "纳斯达克100" in source or "纳斯达克 100" in source:
+        candidates.extend(["纳斯达克100", "纳指100", "纳指"])
+    if tracking_index:
+        simplified = re.sub(r"^(中证|国证|上证|深证)", "", tracking_index)
+        simplified = re.sub(r"(主题)?指数$", "", simplified).strip()
+        if len(simplified) >= 2:
+            candidates.append(simplified)
+    aliases: list[str] = []
+    for candidate in candidates:
+        clean = str(candidate or "").strip()
+        if clean and clean not in aliases:
+            aliases.append(clean)
+    return aliases[:5]
+
+
+def get_cn_etf_metadata(ticker: str, region: str) -> dict[str, object]:
+    """Return source-labelled ETF metadata; never infer an official index with an LLM."""
+    code = ticker.upper().strip().split(".")[0]
+    if region != "cn_a" or not _is_cn_etf_code(code):
+        return {}
+    cached = _load_etf_metadata(code)
+    fetched = {} if cached.get("tracking_index") else _fetch_eastmoney_etf_metadata(code)
+    fund_name = (
+        fetched.get("fund_name")
+        or cached.get("fund_name")
+        or get_security_cn_name(ticker, region)
+    )
+    tracking_index = fetched.get("tracking_index") or cached.get("tracking_index")
+    metadata = {
+        "fund_name": fund_name,
+        "tracking_index": tracking_index,
+        "search_aliases": _etf_search_aliases(str(fund_name or ""), str(tracking_index or "") or None),
+        "source": "Eastmoney fund profile" if fetched else cached.get("source", "local cache"),
+    }
+    if fund_name or tracking_index:
+        _cache_etf_metadata(code, metadata)
+    return metadata
 
 
 def get_security_cn_name(ticker: str, region: str) -> str | None:

@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 
 from .config import get_config
 from .errors import NoMarketDataError, VendorRateLimitError
-from .market_utils import to_cninfo_stock_code
+from .market_utils import is_cn_etf, to_cninfo_stock_code
 
 logger = logging.getLogger(__name__)
 
@@ -345,6 +345,12 @@ def fetch_cninfo_announcements(
         f"CNINFO Official Announcements — {len(anns)} items for "
         f"{ticker.upper()} ({start_date} to {end_date})"
     )
+    if not anns and is_cn_etf(ticker):
+        return (
+            f"<CNINFO source has no indexed data for ETF {ticker.upper()} "
+            f"({start_date} to {end_date}); this does not mean the ETF has no "
+            "official announcements or that the instrument does not exist>"
+        )
     return _format_announcements(anns, header)
 
 

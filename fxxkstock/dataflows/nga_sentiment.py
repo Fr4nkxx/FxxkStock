@@ -10,7 +10,12 @@ from parsel import Selector
 
 from .config import get_config
 from .errors import BrowserUnavailableError
-from .market_utils import detect_market_region, get_security_cn_name
+from .market_utils import (
+    detect_market_region,
+    get_cn_etf_metadata,
+    get_security_cn_name,
+    is_cn_etf,
+)
 
 NGA_GREAT_TIMES_URL = "https://bbs.nga.cn/thread.php?fid=706"
 
@@ -233,7 +238,11 @@ def fetch_nga_sentiment(
     if region not in {"cn_a", "cn_hk"}:
         raise RuntimeError(f"NGA source is unavailable for {ticker.upper()}")
 
-    chinese_name = (get_security_cn_name(ticker, region) or "").strip()
+    etf_metadata = get_cn_etf_metadata(ticker, region) if is_cn_etf(ticker) else {}
+    chinese_name = (
+        str(etf_metadata.get("fund_name") or "")
+        or (get_security_cn_name(ticker, region) or "")
+    ).strip()
     if not chinese_name:
         return (
             f"<no nga posts: Chinese security name unavailable for "
@@ -251,36 +260,78 @@ def fetch_nga_sentiment(
     reply_limit = int(config.get("cn_nga_reply_limit", 20))
     total_limit = int(limit or config.get("cn_guba_post_limit", 15))
 
-    stock_threads = _search_threads(
-        chinese_name,
-        lookback_days=lookback_days,
-        as_of=as_of,
-    )
+    query_results: list[tuple[str, str, list[dict]]] = []
+    if etf_metadata:
+        aliases = [
+            str(item).strip()
+            for item in etf_metadata.get("search_aliases", [])
+            if str(item).strip()
+        ][: int(config.get("cn_nga_etf_query_limit", 4))]
+        tracking_index = str(etf_metadata.get("tracking_index") or "")
+        for index, keyword in enumerate(aliases):
+            scope = (
+                "ETF"
+                if keyword == chinese_name
+                else "跟踪指数"
+                if keyword == tracking_index
+                else "指数别名"
+            )
+            query_results.append((
+                scope,
+                keyword,
+                _search_threads(keyword, lookback_days=lookback_days, as_of=as_of),
+            ))
+    else:
+        query_results.append((
+            "个股",
+            chinese_name,
+            _search_threads(chinese_name, lookback_days=lookback_days, as_of=as_of),
+        ))
+
+    stock_threads = query_results[0][2] if query_results else []
     industry = _resolve_industry(ticker, chinese_name)
     industry_threads: list[dict] = []
-    if len(stock_threads) < min_stock_threads and industry and industry != chinese_name:
+    query_thread_count = sum(len(items) for _, _, items in query_results)
+    if (
+        not etf_metadata
+        and query_thread_count < min_stock_threads
+        and industry
+        and industry != chinese_name
+    ):
         industry_threads = _search_threads(
             industry,
             lookback_days=lookback_days,
             as_of=as_of,
         )
 
-    selected = [
-        ("个股", chinese_name, thread)
-        for thread in stock_threads[:thread_limit]
-    ]
+    selected = []
+    seen_links: set[str] = set()
+    for scope, keyword, threads in query_results:
+        for thread in threads[:thread_limit]:
+            link = thread.get("link", "")
+            if not link or link in seen_links:
+                continue
+            seen_links.add(link)
+            selected.append((scope, keyword, thread))
     selected.extend(
         ("行业", industry or "", thread)
         for thread in industry_threads[:thread_limit]
     )
 
     lines = [
-        f"NGA 大时代 — {ticker.upper()}，个股关键词“{chinese_name}”",
+        f"NGA 大时代 — {ticker.upper()}，主关键词“{chinese_name}”",
         (
-            f"近期个股主题 {len(stock_threads)} 个；"
+            f"查询层级 {len(query_results)} 个；"
+            f"近期候选主题 {query_thread_count} 个；"
             f"行业补充 {len(industry_threads)} 个"
         ),
     ]
+    if etf_metadata:
+        lines.extend([
+            f"ETF 跟踪指数：{etf_metadata.get('tracking_index') or '未取得'}",
+            "情绪范围说明：ETF、跟踪指数和指数别名分别采集；"
+            "指数或主题情绪不等同于 ETF 交易情绪。",
+        ])
     reply_count = 0
     for scope, keyword, thread in selected:
         if reply_count >= total_limit:

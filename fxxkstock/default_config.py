@@ -170,6 +170,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "cn_nga_lookback_days": 30,
     "cn_nga_min_stock_threads": 3,
     "cn_nga_thread_limit": 3,
+    "cn_nga_etf_query_limit": 4,
     "cn_nga_reply_limit": 20,
     "cn_ths_news_enabled": True,
     "cn_global_news_article_limit": 10,

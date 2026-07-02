@@ -107,3 +107,41 @@ def test_fetch_nga_sentiment_missing_chinese_name_is_normal_empty_result():
         result = fetch_nga_sentiment("159819.SZ")
 
     assert result.startswith("<no nga posts:")
+
+
+def test_fetch_nga_sentiment_etf_searches_fund_index_and_alias_separately():
+    with (
+        patch(
+            "fxxkstock.dataflows.nga_sentiment.get_cn_etf_metadata",
+            return_value={
+                "fund_name": "国泰纳斯达克100ETF",
+                "tracking_index": "纳斯达克100指数",
+                "search_aliases": [
+                    "国泰纳斯达克100ETF",
+                    "纳斯达克100指数",
+                    "纳指",
+                ],
+            },
+        ),
+        patch(
+            "fxxkstock.dataflows.nga_sentiment._render_nga_html",
+            side_effect=[SEARCH_HTML, SEARCH_HTML, SEARCH_HTML, THREAD_HTML],
+        ),
+        patch(
+            "fxxkstock.dataflows.nga_sentiment.get_config",
+            return_value={
+                "market_region": "cn_a",
+                "cn_nga_lookback_days": 30,
+                "cn_nga_min_stock_threads": 3,
+                "cn_nga_thread_limit": 1,
+                "cn_nga_reply_limit": 20,
+                "cn_nga_etf_query_limit": 4,
+                "cn_guba_post_limit": 15,
+            },
+        ),
+    ):
+        result = fetch_nga_sentiment("513100.SS", as_of_date="2026-06-30")
+
+    assert "ETF 跟踪指数：纳斯达克100指数" in result
+    assert "查询层级 3 个" in result
+    assert "指数或主题情绪不等同于 ETF 交易情绪" in result

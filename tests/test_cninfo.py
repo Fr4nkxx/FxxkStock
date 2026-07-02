@@ -178,3 +178,18 @@ def test_query_announcements_uses_browser_etf_org_id_fallback():
 
     assert captured["stock"] == "159819,jjjl0000041"
     assert captured["column"] == "fund"
+
+
+@pytest.mark.unit
+def test_etf_empty_cninfo_result_is_source_gap_not_no_announcement_claim():
+    with patch(
+        "fxxkstock.dataflows.cninfo._query_announcements",
+        return_value=[],
+    ):
+        result = fetch_cninfo_announcements(
+            "513100.SS", "2026-06-01", "2026-06-30"
+        )
+
+    assert "source has no indexed data for ETF 513100.SS" in result
+    assert "does not mean the ETF has no official announcements" in result
+    assert "instrument does not exist" in result
