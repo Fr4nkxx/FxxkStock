@@ -30,6 +30,7 @@ _FAILURE_PREFIXES = (
     "<no guba",
     "<no browser guba",
     "<no retail community",
+    "<no nga",
 )
 
 

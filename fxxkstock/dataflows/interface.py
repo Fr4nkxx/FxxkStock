@@ -211,6 +211,7 @@ def _build_vendor_chain(method: str, explicit: list[str], all_available: list[st
     ]
     if not config.get("cn_browser_enabled", True):
         cn_vendors = [v for v in cn_vendors if v != "browser"]
+        base = [v for v in base if v != "browser"]
     chain: list[str] = []
     for v in cn_vendors + base:
         if v not in chain:

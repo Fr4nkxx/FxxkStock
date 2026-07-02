@@ -6,10 +6,13 @@ import logging
 from typing import Any
 
 from fxxkstock.agents.schemas import (
+    EvidenceLedger,
     FalsificationAudit,
     ResearchabilityAssessment,
     ResearchPlan,
     render_falsification_audit,
+    normalize_evidence_ledger,
+    render_evidence_ledger,
     render_research_plan,
     render_researchability,
 )
@@ -30,6 +33,65 @@ def _model_payload(model: Any, markdown: str) -> dict[str, Any]:
     }
 
 
+def create_evidence_ledger_builder(llm):
+    structured_llm = bind_structured(llm, EvidenceLedger, "Evidence Ledger Builder")
+
+    def evidence_ledger_node(state) -> dict:
+        instrument = get_instrument_context_from_state(state)
+        prompt = f"""You are the Evidence Ledger Builder. Extract at most 20
+decisive, non-duplicative claims from the four analyst reports. Preserve source
+references and dates. Distinguish observed facts, calculations, inference and
+opinion. A claim is supported only when it has verifiable references and at
+least two genuinely independent sources; syndicated copies count as one.
+Record material counter-evidence. Use provisional claim IDs; the application
+will assign stable E01..E20 IDs.
+
+{instrument}
+
+MARKET REPORT:
+{state.get("market_report", "")}
+
+SENTIMENT REPORT:
+{state.get("sentiment_report", "")}
+
+NEWS REPORT:
+{state.get("news_report", "")}
+
+FUNDAMENTALS REPORT:
+{state.get("fundamentals_report", "")}"""
+        try:
+            if structured_llm is None:
+                raise ValueError("structured output unavailable")
+            ledger = structured_llm.invoke(prompt)
+            if ledger is None:
+                raise ValueError("structured output returned no result")
+            ledger = normalize_evidence_ledger(ledger)
+            return {
+                "evidence_ledger": _model_payload(
+                    ledger, render_evidence_ledger(ledger)
+                )
+            }
+        except Exception as exc:
+            logger.warning("Evidence ledger structured output failed: %s", exc)
+            return {
+                "evidence_ledger": {
+                    "status": "unavailable",
+                    "claims": [],
+                    "omitted_or_missing_evidence": [
+                        "Structured evidence extraction was unavailable."
+                    ],
+                    "markdown": (
+                        "# 证据账本 / Evidence Ledger\n\n"
+                        "> Evidence ledger unavailable. Downstream agents must "
+                        "work directly from the analyst reports and must not "
+                        "invent claim IDs."
+                    ),
+                }
+            }
+
+    return evidence_ledger_node
+
+
 def create_researchability_assessor(llm):
     structured_llm = bind_structured(
         llm, ResearchabilityAssessment, "Researchability Assessor"
@@ -37,6 +99,7 @@ def create_researchability_assessor(llm):
 
     def researchability_node(state) -> dict:
         instrument = get_instrument_context_from_state(state)
+        evidence_ledger = (state.get("evidence_ledger") or {}).get("markdown", "")
         prompt = f"""You are the Researchability Assessor. Before the bull/bear debate,
 evaluate how safely an AI system can research this instrument from the evidence
 collected in this run. Do not recommend Buy/Sell and do not confuse abundant
@@ -58,6 +121,9 @@ NEWS REPORT:
 
 FUNDAMENTALS REPORT:
 {state.get("fundamentals_report", "")}
+
+EVIDENCE LEDGER:
+{evidence_ledger}
 
 Grade A when evidence is broad, current, and independently corroborated.
 Grade B when meaningful gaps or inference remain. Grade C when decisive facts
@@ -111,6 +177,7 @@ def create_falsification_auditor(llm):
         researchability = (state.get("researchability_assessment") or {}).get(
             "markdown", ""
         )
+        evidence_ledger = (state.get("evidence_ledger") or {}).get("markdown", "")
         initial_plan = state.get("investment_plan", "")
         prompt = f"""You are an independent Falsification Auditor. Challenge the
 Research Manager's initial plan rather than improving its rhetoric. Identify the
@@ -125,6 +192,9 @@ Bias flags alone are not critical. Do not choose the final rating.
 
 RESEARCHABILITY ASSESSMENT:
 {researchability}
+
+EVIDENCE LEDGER (cite claim_id for ledger claims; identify omissions explicitly):
+{evidence_ledger}
 
 ANALYST REPORTS:
 Market: {state.get("market_report", "")}

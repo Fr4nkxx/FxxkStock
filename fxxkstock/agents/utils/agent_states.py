@@ -59,9 +59,12 @@ class AgentState(MessagesState):
         str, "Report from the News Researcher of current world affairs"
     ]
     fundamentals_report: Annotated[str, "Report from the Fundamentals Researcher"]
+    evidence_ledger: Annotated[dict[str, Any], "Structured decisive evidence ledger"]
     researchability_assessment: Annotated[
         dict[str, Any], "Structured pre-debate AI researchability assessment"
     ]
+    blind_bull_argument: Annotated[str, "Independent bullish argument"]
+    blind_bear_argument: Annotated[str, "Independent bearish argument"]
 
     # researcher team discussion step
     investment_debate_state: Annotated[
@@ -82,6 +85,9 @@ class AgentState(MessagesState):
         RiskDebateState, "Current state of the debate on evaluating risk"
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
+    portfolio_decision_metadata: Annotated[
+        dict[str, Any], "Machine-readable final portfolio decision"
+    ]
     past_context: Annotated[str, "Memory log context injected at run start (same-ticker decisions + cross-ticker lessons)"]
     prior_analysis_context: Annotated[str, "Previous same-ticker decision context"]
     prior_reports: Annotated[dict[str, Any], "Previous same-ticker analyst reports"]

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import json
 import re
+from pathlib import Path
 from typing import Mapping
 
 from .config import get_config
@@ -114,10 +116,9 @@ def to_eastmoney_symbol(ticker: str, region: str) -> tuple[str, str]:
     bare = upper.split(".")[0]
 
     if region == "cn_hk" or upper.endswith(".HK"):
-        code = bare.lstrip("0") or bare
         # 港股东财 market id = 116
         hk = bare.zfill(5) if bare.isdigit() else bare
-        return f"116.{hk}", hk
+        return f"116.{hk}", bare
 
     if upper.endswith(".SS") or (region == "cn_a" and bare.startswith(("6", "9"))):
         return f"1.{bare}", bare
@@ -151,6 +152,7 @@ def to_cninfo_stock_code(ticker: str) -> str:
 
 
 _EM_QUOTE_URL = "https://push2.eastmoney.com/api/qt/stock/get"
+_EM_FUND_NAME_URL = "https://fundgz.1234567.com.cn/js/{code}.js"
 _EM_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 
@@ -174,20 +176,105 @@ def _fetch_eastmoney_cn_name(secid: str) -> str | None:
     return None
 
 
+def _contains_chinese(value: str | None) -> bool:
+    return bool(value and re.search(r"[\u4e00-\u9fff]", value))
+
+
+def _is_cn_etf_code(code: str) -> bool:
+    return bool(
+        re.fullmatch(r"\d{6}", code)
+        and code.startswith(("15", "16", "51", "56", "58"))
+    )
+
+
+def _fund_name_cache_path() -> Path:
+    return Path(get_config()["data_cache_dir"]) / "security_names" / "cn_funds.json"
+
+
+def _load_cached_fund_cn_name(code: str) -> str | None:
+    path = _fund_name_cache_path()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError, TypeError):
+        return None
+    name = payload.get(code) if isinstance(payload, dict) else None
+    return name.strip() if isinstance(name, str) and _contains_chinese(name) else None
+
+
+def _cache_fund_cn_name(code: str, name: str) -> None:
+    if not _contains_chinese(name):
+        return
+    path = _fund_name_cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError, TypeError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        payload[code] = name.strip()
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+    except OSError as exc:
+        logger.debug("Could not cache Chinese fund name for %s: %s", code, exc)
+
+
+def _fetch_eastmoney_fund_cn_name(code: str) -> str | None:
+    """Resolve an ETF/fund's official Chinese name from Eastmoney fund data."""
+    from urllib.request import Request, urlopen
+
+    url = _EM_FUND_NAME_URL.format(code=code)
+    req = Request(
+        url,
+        headers={
+            "User-Agent": _EM_UA,
+            "Accept": "application/javascript,text/javascript,*/*",
+            "Referer": f"https://fund.eastmoney.com/{code}.html",
+        },
+    )
+    try:
+        with urlopen(req, timeout=10) as resp:
+            text = resp.read().decode("utf-8", errors="replace")
+        match = re.search(r"jsonpgz\((\{.*\})\)\s*;?", text, re.DOTALL)
+        if not match:
+            return None
+        payload = json.loads(match.group(1))
+        name = payload.get("name")
+        if isinstance(name, str) and _contains_chinese(name):
+            return name.strip()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Eastmoney fund name lookup failed for code=%s: %s", code, exc)
+    return None
+
+
 def get_security_cn_name(ticker: str, region: str) -> str | None:
     """返回国内源权威中文简称；失败时返回 None（调用方回退 yfinance）。"""
     if not is_cn_region(region):
         return None
 
     if region == "cn_a":
-        em_code, _ = to_eastmoney_symbol(ticker, "cn_a")
+        em_code, bare = to_eastmoney_symbol(ticker, "cn_a")
         name = _fetch_eastmoney_cn_name(em_code)
-        if name:
+        if _contains_chinese(name):
             return name
+        if _is_cn_etf_code(bare):
+            cached = _load_cached_fund_cn_name(bare)
+            if cached:
+                return cached
+            fund_name = _fetch_eastmoney_fund_cn_name(bare)
+            if fund_name:
+                _cache_fund_cn_name(bare, fund_name)
+                return fund_name
         try:
             from .cninfo import get_cn_name
 
-            return get_cn_name(to_cninfo_stock_code(ticker))
+            cninfo_name = get_cn_name(to_cninfo_stock_code(ticker))
+            return cninfo_name if _contains_chinese(cninfo_name) else None
         except ValueError:
             return None
 

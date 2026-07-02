@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ from fxxkstock.agents.utils.agent_utils import (
     resolve_instrument_identity,
 )
 from fxxkstock.agents.utils.memory import TradingMemoryLog
+from fxxkstock.agents.utils.calibration import CalibrationStore
 from fxxkstock.agents.utils.ticker_memory import TickerMemoryStore
 from fxxkstock.dataflows.config import get_config, set_config
 from fxxkstock.dataflows.market_data_validator import (
@@ -67,7 +69,7 @@ class FxxKStockGraph:
             callbacks: Optional list of callback handlers (e.g., for tracking LLM/tool stats)
         """
         self.debug = debug
-        self.config = config or DEFAULT_CONFIG
+        self.config = {**DEFAULT_CONFIG, **(config or {})}
         self.callbacks = callbacks or []
         self.selected_analysts = tuple(selected_analysts)
 
@@ -103,6 +105,7 @@ class FxxKStockGraph:
 
         self.memory_log = TradingMemoryLog(self.config)
         self.ticker_memory = TickerMemoryStore(self.config)
+        self.calibration_store = CalibrationStore(self.config)
 
         # Create tool nodes
         self.tool_nodes = self._create_tool_nodes()
@@ -314,6 +317,44 @@ class FxxKStockGraph:
         if updates:
             self.memory_log.batch_update_with_outcomes(updates)
 
+    def _fetch_calibration_outcome(
+        self, ticker: str, trade_date: str, horizon: int, benchmark: str
+    ) -> dict[str, Any] | None:
+        """Return an exact-horizon close and returns, or None until it is available."""
+        from fxxkstock.dataflows.symbol_utils import normalize_symbol
+
+        try:
+            start = datetime.strptime(trade_date, "%Y-%m-%d")
+            end = start + timedelta(days=horizon * 2 + 10)
+            stock = yf.Ticker(normalize_symbol(ticker)).history(
+                start=trade_date, end=end.strftime("%Y-%m-%d")
+            )
+            bench = yf.Ticker(benchmark).history(
+                start=trade_date, end=end.strftime("%Y-%m-%d")
+            )
+            if len(stock) <= horizon:
+                return None
+            initial = float(stock["Close"].iloc[0])
+            actual = float(stock["Close"].iloc[horizon])
+            raw = actual / initial - 1
+            alpha = None
+            benchmark_return = None
+            if len(bench) > horizon:
+                benchmark_return = float(
+                    bench["Close"].iloc[horizon] / bench["Close"].iloc[0] - 1
+                )
+                alpha = raw - benchmark_return
+            return {
+                "actual_price": actual,
+                "raw_return": raw,
+                "benchmark_return": benchmark_return,
+                "alpha_return": alpha,
+                "actual_holding_days": horizon,
+            }
+        except Exception as exc:
+            logger.warning("Calibration outcome unavailable for %s: %s", ticker, exc)
+            return None
+
     def resolve_instrument_context(
         self,
         ticker: str,
@@ -385,6 +426,9 @@ class FxxKStockGraph:
 
         self.ticker = company_name
         self._resolve_pending_entries(company_name)
+        self.calibration_store.resolve_pending(
+            company_name, self._fetch_calibration_outcome
+        )
         snapshot = self.ticker_memory.load(company_name)
         reuse_fundamentals = (
             analysis_mode == "auto"
@@ -508,6 +552,44 @@ class FxxKStockGraph:
             previous,
             refreshed=(self._prepared_run or {}).get("refresh"),
         )
+        decision = final_state.get("portfolio_decision_metadata") or {}
+        if not decision:
+            markdown = final_state.get("final_trade_decision", "")
+            field = lambda label: (
+                re.search(
+                    rf"\*\*{re.escape(label)}\*\*:\s*([^\n]+)",
+                    markdown,
+                    re.IGNORECASE,
+                )
+            )
+            rating_match = field("Rating")
+            if rating_match:
+                decision = {
+                    "rating": rating_match.group(1).strip().capitalize(),
+                    "data_confidence": (
+                        field("Data Confidence").group(1).strip().capitalize()
+                        if field("Data Confidence") else None
+                    ),
+                    "thesis_confidence": (
+                        field("Thesis Confidence").group(1).strip().capitalize()
+                        if field("Thesis Confidence") else None
+                    ),
+                    "execution_confidence": (
+                        field("Execution Confidence").group(1).strip().capitalize()
+                        if field("Execution Confidence") else None
+                    ),
+                    "predictions": [],
+                }
+        current_snapshot = final_state.get("current_market_snapshot") or {}
+        initial_close = current_snapshot.get("close")
+        if decision and initial_close is not None:
+            self.calibration_store.record(
+                company_name,
+                str(trade_date),
+                decision,
+                float(initial_close),
+                self._resolve_benchmark(company_name),
+            )
         if self.config.get("checkpoint_enabled"):
             clear_checkpoint(
                 self.config["data_cache_dir"], company_name, str(trade_date)
@@ -632,6 +714,9 @@ class FxxKStockGraph:
             "researchability_assessment": final_state.get(
                 "researchability_assessment", {}
             ),
+            "evidence_ledger": final_state.get("evidence_ledger", {}),
+            "blind_bull_argument": final_state.get("blind_bull_argument", ""),
+            "blind_bear_argument": final_state.get("blind_bear_argument", ""),
             "investment_debate_state": {
                 "bull_history": final_state["investment_debate_state"]["bull_history"],
                 "bear_history": final_state["investment_debate_state"]["bear_history"],
@@ -657,6 +742,9 @@ class FxxKStockGraph:
             ),
             "falsification_audit": final_state.get("falsification_audit", {}),
             "final_trade_decision": final_state["final_trade_decision"],
+            "portfolio_decision_metadata": final_state.get(
+                "portfolio_decision_metadata", {}
+            ),
         }
 
         # Save to file. Reject ticker values that would escape the

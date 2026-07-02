@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from fxxkstock.llm_clients.model_catalog import MODEL_OPTIONS
 from fxxkstock.agents.utils.ticker_memory import TickerMemoryStore
+from fxxkstock.agents.utils.calibration import CalibrationStore
 from fxxkstock.agents.utils.position import PositionContext
 from fxxkstock.default_config import DEFAULT_CONFIG
 from fxxkstock.dataflows.chrome_manager import ChromeManager
@@ -266,6 +267,14 @@ def get_ticker_memory_status(ticker: str, trade_date: str | None = None) -> dict
         ticker.strip(),
         as_of=trade_date,
     )
+
+
+@app.get("/api/calibration/{ticker}")
+def get_calibration(ticker: str) -> dict[str, Any]:
+    try:
+        return CalibrationStore(DEFAULT_CONFIG).query(ticker.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/settings")

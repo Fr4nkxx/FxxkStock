@@ -18,6 +18,7 @@ def create_bull_researcher(llm):
         researchability = (state.get("researchability_assessment") or {}).get(
             "markdown", ""
         )
+        evidence_ledger = (state.get("evidence_ledger") or {}).get("markdown", "")
         instrument_context = get_instrument_context_from_state(state)
         asset_type = state.get("asset_type", "stock")
         target_label = "stock" if asset_type == "stock" else "asset"
@@ -44,6 +45,8 @@ Latest world affairs news: {news_report}
 {fundamentals_label}: {fundamentals_report}
 AI researchability assessment (do not overstate evidence beyond these limits):
 {researchability}
+Evidence ledger (cite E IDs for ledger claims; label any omitted evidence):
+{evidence_ledger}
 Conversation history of the debate: {history}
 Last bear argument: {current_response}
 Use this information to deliver a compelling bull argument, refute the bear's concerns, and engage in a dynamic debate that demonstrates the strengths of the bull position.

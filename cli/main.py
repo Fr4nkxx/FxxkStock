@@ -1,5 +1,6 @@
 import datetime
 import os
+import sys
 import time
 from collections import deque
 from functools import wraps
@@ -548,11 +549,10 @@ def get_user_selections():
         console.print(
             f"[green]Detected asset type:[/green] {asset_type.value}"
         )
-    position = (
-        ask_position_context()
-        if asset_type.value == "stock"
-        else {"status": "unknown"}
-    )
+    if asset_type.value == "stock" and sys.stdin.isatty():
+        position = ask_position_context()
+    else:
+        position = {"status": "unknown"}
 
     # Step 2: Analysis date
     default_date = datetime.datetime.now().strftime("%Y-%m-%d")

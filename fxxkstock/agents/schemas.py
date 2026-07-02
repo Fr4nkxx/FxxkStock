@@ -86,6 +86,110 @@ class ConfidenceLevel(str, Enum):
     HIGH = "High"
 
 
+class EvidenceType(str, Enum):
+    OBSERVED = "observed"
+    CALCULATED = "calculated"
+    INFERRED = "inferred"
+    OPINION = "opinion"
+
+
+class EvidenceDirection(str, Enum):
+    BULLISH = "bullish"
+    BEARISH = "bearish"
+    NEUTRAL = "neutral"
+
+
+class EvidenceStatus(str, Enum):
+    SUPPORTED = "supported"
+    SINGLE_SOURCE = "single_source"
+    UNSUPPORTED = "unsupported"
+    CONFLICTED = "conflicted"
+
+
+class EvidenceClaim(BaseModel):
+    claim_id: str = Field(description="Stable identifier E01, E02, and so on.")
+    claim: str
+    type: EvidenceType
+    direction: EvidenceDirection
+    source_refs: list[str] = Field(default_factory=list)
+    data_date: str | None = None
+    independent_source_count: int = Field(default=0, ge=0)
+    confidence: ConfidenceLevel
+    counter_evidence: list[str] = Field(default_factory=list)
+    status: EvidenceStatus
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def normalize_evidence_type(cls, value):
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            aliases = {
+                "inference": EvidenceType.INFERRED.value,
+                "calculation": EvidenceType.CALCULATED.value,
+                "observation": EvidenceType.OBSERVED.value,
+            }
+            return aliases.get(normalized, normalized)
+        return value
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def normalize_confidence(cls, value):
+        return value.strip().capitalize() if isinstance(value, str) else value
+
+
+class EvidenceLedger(BaseModel):
+    """A compact, source-aware ledger of the run's decisive evidence."""
+
+    claims: list[EvidenceClaim] = Field(default_factory=list, max_length=20)
+    omitted_or_missing_evidence: list[str] = Field(default_factory=list)
+
+
+def normalize_evidence_ledger(ledger: EvidenceLedger) -> EvidenceLedger:
+    """Apply deterministic IDs and prevent unsupported claims being overstated."""
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    claims: list[EvidenceClaim] = []
+    for item in ledger.claims[:20]:
+        key = (
+            " ".join(item.claim.lower().split()),
+            tuple(sorted(ref.lower().strip() for ref in item.source_refs)),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        data = item.model_dump()
+        data["claim_id"] = f"E{len(claims) + 1:02d}"
+        if item.status == EvidenceStatus.SUPPORTED:
+            if not item.source_refs:
+                data["status"] = EvidenceStatus.UNSUPPORTED
+            elif item.independent_source_count < 2:
+                data["status"] = EvidenceStatus.SINGLE_SOURCE
+        claims.append(EvidenceClaim.model_validate(data))
+    return EvidenceLedger(
+        claims=claims,
+        omitted_or_missing_evidence=ledger.omitted_or_missing_evidence,
+    )
+
+
+def render_evidence_ledger(ledger: EvidenceLedger) -> str:
+    rows = [
+        "| ID | Claim | Type | Direction | Status | Confidence | Sources | Date | Counter-evidence |",
+        "|---|---|---|---|---|---|---:|---|---|",
+    ]
+    for item in ledger.claims:
+        clean = lambda value: str(value).replace("|", "\\|").replace("\n", " ")
+        rows.append(
+            f"| {item.claim_id} | {clean(item.claim)} | {item.type.value} | "
+            f"{item.direction.value} | {item.status.value} | {item.confidence.value} | "
+            f"{item.independent_source_count} | {clean(item.data_date or '-')} | "
+            f"{clean('; '.join(item.counter_evidence) or '-')} |"
+        )
+    missing = "\n".join(f"- {item}" for item in ledger.omitted_or_missing_evidence)
+    return "\n".join(
+        ["# 证据账本 / Evidence Ledger", "", *(rows or ["No claims extracted."]), "",
+         "## Missing or Omitted Evidence", missing or "- None identified"]
+    )
+
+
 class ResearchabilityAssessment(BaseModel):
     """Pre-debate assessment of evidence breadth and research limitations."""
 
@@ -386,6 +490,11 @@ class PortfolioDecision(BaseModel):
     execution_confidence_reason: str = Field(
         description="One sentence explaining the execution confidence level.",
     )
+    predictions: list["PricePrediction"] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Up to three market-price predictions that can be verified automatically.",
+    )
 
     @field_validator("price_target", mode="before")
     @classmethod
@@ -436,7 +545,43 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
         "",
         f"**Execution Confidence Reason**: {decision.execution_confidence_reason}",
     ])
+    if decision.predictions:
+        parts.extend(["", "## Machine-Verifiable Predictions"])
+        for index, prediction in enumerate(decision.predictions, 1):
+            parts.extend([
+                "",
+                f"### Prediction {index}",
+                f"- Claim: {prediction.claim}",
+                f"- Condition: {prediction.comparison.value} {prediction.target_price}",
+                f"- Horizon: {prediction.horizon_trading_days} trading days",
+                f"- Confidence: {prediction.confidence.value}",
+                f"- Rationale: {prediction.rationale}",
+            ])
     return "\n".join(parts)
+
+
+class PredictionComparison(str, Enum):
+    ABOVE = "Above"
+    BELOW = "Below"
+
+
+class PricePrediction(BaseModel):
+    claim: str
+    comparison: PredictionComparison
+    target_price: float = Field(gt=0)
+    horizon_trading_days: Literal[5, 20]
+    confidence: ConfidenceLevel
+    rationale: str
+
+    @field_validator("comparison", mode="before")
+    @classmethod
+    def normalize_comparison(cls, value):
+        return value.strip().capitalize() if isinstance(value, str) else value
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def normalize_confidence(cls, value):
+        return value.strip().capitalize() if isinstance(value, str) else value
 
 
 # ---------------------------------------------------------------------------

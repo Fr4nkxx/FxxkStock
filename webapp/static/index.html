@@ -363,6 +363,7 @@
               <button class="report-tab" data-report-tab="risks">风险因素</button>
               <button class="report-tab" data-report-tab="data">数据依据</button>
               <button class="report-tab" data-report-tab="audit">反偏见审计</button>
+              <button class="report-tab" data-report-tab="calibration">预测校准</button>
               <button class="report-tab" data-report-tab="history">历史对比</button>
             </div>
             <div class="report-actions">
@@ -430,7 +431,7 @@
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const REPORT_TABS = ["summary", "thesis", "risks", "data", "audit", "history"];
+    const REPORT_TABS = ["summary", "thesis", "risks", "data", "audit", "calibration", "history"];
     const RATING_LABELS = {
       BUY: "买入", OVERWEIGHT: "增持", HOLD: "持有",
       UNDERWEIGHT: "减持", SELL: "卖出",
@@ -455,6 +456,7 @@
     let eventLog = [];
     let currentReport = { markdown: "", sections: {} };
     let currentOverview = null;
+    let currentCalibration = null;
     let activeReportTab = "summary";
     let modelCatalog = {};
 
@@ -659,7 +661,8 @@
           ? loadReport(group.reports[0].id)
           : Promise.resolve(clearReport());
       const overviewPromise = loadOverview("1d");
-      await Promise.allSettled([reportPromise, overviewPromise]);
+      const calibrationPromise = loadCalibration(ticker);
+      await Promise.allSettled([reportPromise, overviewPromise, calibrationPromise]);
       if (activeRun) await restoreRun(activeRun);
     }
 
@@ -733,6 +736,33 @@
       ].forEach((id) => $(id).textContent = "-");
       renderCorePoints("");
     }
+    async function loadCalibration(ticker) {
+      currentCalibration = null;
+      const response = await fetch(`/api/calibration/${encodeURIComponent(ticker)}`);
+      if (response.ok && selectedTicker === ticker) currentCalibration = await response.json();
+      if (activeReportTab === "calibration") renderReportTab("calibration");
+    }
+    function renderCalibration() {
+      const data = currentCalibration || {};
+      const resolved = data.resolved || [];
+      if (!resolved.length) return '<div class="empty-report">尚无到期预测</div>';
+      const confidence = data.summary?.prediction_confidence || {};
+      const confidenceRows = ["Low", "Medium", "High"].map((level) => {
+        const item = confidence[level] || {};
+        const rate = item.hit_rate == null ? "-" : `${formatNumber(item.hit_rate * 100, 1)}%`;
+        return `<tr><td>${confidenceLabel(level)}</td><td>${item.count || 0}</td><td>${rate}</td></tr>`;
+      }).join("");
+      const rows = resolved.map((item) => {
+        const horizon = item.horizon_trading_days ?? "-";
+        const result = item.hit == null ? "仅记录" : item.hit ? "命中" : "未命中";
+        const actual = item.actual_price == null ? "-" : formatNumber(item.actual_price, 3);
+        const raw = item.raw_return == null ? "-" : `${formatNumber(item.raw_return * 100, 2)}%`;
+        const alpha = item.alpha_return == null ? "-" : `${formatNumber(item.alpha_return * 100, 2)}%`;
+        const label = item.claim || item.rating || "评级";
+        return `<tr><td>${escapeHtml(item.trade_date || "")}</td><td>${escapeHtml(label)}</td><td>${horizon}日</td><td>${actual}</td><td>${raw}</td><td>${alpha}</td><td>${result}</td></tr>`;
+      }).join("");
+      return `<h2>到期预测</h2><p>待校准：${(data.pending || []).length} 项</p><table><thead><tr><th>日期</th><th>预测/评级</th><th>周期</th><th>实际价格</th><th>收益</th><th>Alpha</th><th>结果</th></tr></thead><tbody>${rows}</tbody></table><h2>价格预测置信度统计</h2><table><thead><tr><th>置信度</th><th>已到期</th><th>命中率</th></tr></thead><tbody>${confidenceRows}</tbody></table>`;
+    }
     async function loadReport(reportId) {
       const response = await fetch(`/api/reports/history/${encodeURIComponent(reportId)}`);
       if (!response.ok) return;
@@ -740,6 +770,7 @@
       currentReport = await response.json();
       updateDecisionPanel(currentReport);
       renderReportTab(activeReportTab);
+      if (selectedTicker) await loadCalibration(selectedTicker);
     }
     function renderHistoryVersions() {
       const group = stockGroups.find((item) => item.ticker === selectedTicker);
@@ -757,6 +788,10 @@
       if (tab === "history") {
         $("reportContent").innerHTML = renderHistoryVersions();
         document.querySelectorAll(".version-btn").forEach((button) => button.addEventListener("click", () => loadReport(button.dataset.version)));
+        return;
+      }
+      if (tab === "calibration") {
+        $("reportContent").innerHTML = renderCalibration();
         return;
       }
       const content = currentReport.sections?.[tab] || (tab === "summary" ? currentReport.markdown : "");

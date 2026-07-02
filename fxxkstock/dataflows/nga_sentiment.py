@@ -235,7 +235,10 @@ def fetch_nga_sentiment(
 
     chinese_name = (get_security_cn_name(ticker, region) or "").strip()
     if not chinese_name:
-        raise RuntimeError(f"Chinese security name unavailable for {ticker.upper()}")
+        return (
+            f"<no nga posts: Chinese security name unavailable for "
+            f"{ticker.upper()}>"
+        )
 
     as_of = (
         datetime.strptime(as_of_date, "%Y-%m-%d")

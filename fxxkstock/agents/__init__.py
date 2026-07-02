@@ -7,9 +7,14 @@ from .analysts.sentiment_analyst import (
 )
 from .managers.portfolio_manager import create_portfolio_manager
 from .managers.anti_bias import (
+    create_evidence_ledger_builder,
     create_falsification_auditor,
     create_research_manager_revision,
     create_researchability_assessor,
+)
+from .researchers.blind_researchers import (
+    create_blind_bear_researcher,
+    create_blind_bull_researcher,
 )
 from .managers.research_manager import create_research_manager
 from .researchers.bear_researcher import create_bear_researcher
@@ -28,6 +33,9 @@ __all__ = [
     "RiskDebateState",
     "create_bear_researcher",
     "create_bull_researcher",
+    "create_blind_bear_researcher",
+    "create_blind_bull_researcher",
+    "create_evidence_ledger_builder",
     "create_research_manager",
     "create_fundamentals_analyst",
     "create_market_analyst",

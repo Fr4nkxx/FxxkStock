@@ -91,3 +91,19 @@ def test_fetch_nga_sentiment_formats_replies():
     assert "太极实业讨论楼" in result
     assert "短期走势偏强" in result
     assert "需要继续观察成交量" in result
+
+
+def test_fetch_nga_sentiment_missing_chinese_name_is_normal_empty_result():
+    with (
+        patch(
+            "fxxkstock.dataflows.nga_sentiment.get_security_cn_name",
+            return_value=None,
+        ),
+        patch(
+            "fxxkstock.dataflows.nga_sentiment.get_config",
+            return_value={"market_region": "cn_a"},
+        ),
+    ):
+        result = fetch_nga_sentiment("159819.SZ")
+
+    assert result.startswith("<no nga posts:")

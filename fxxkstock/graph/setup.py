@@ -8,10 +8,13 @@ from langgraph.prebuilt import ToolNode
 from fxxkstock.agents import (
     create_aggressive_debator,
     create_bear_researcher,
+    create_blind_bear_researcher,
+    create_blind_bull_researcher,
     create_bull_researcher,
     create_conservative_debator,
     create_fundamentals_analyst,
     create_falsification_auditor,
+    create_evidence_ledger_builder,
     create_market_analyst,
     create_msg_delete,
     create_neutral_debator,
@@ -69,6 +72,11 @@ class GraphSetup:
         # Create researcher and manager nodes
         bull_researcher_node = create_bull_researcher(self.quick_thinking_llm)
         bear_researcher_node = create_bear_researcher(self.quick_thinking_llm)
+        blind_bull_node = create_blind_bull_researcher(self.quick_thinking_llm)
+        blind_bear_node = create_blind_bear_researcher(self.quick_thinking_llm)
+        evidence_ledger_node = create_evidence_ledger_builder(
+            self.quick_thinking_llm
+        )
         research_manager_node = create_research_manager(self.deep_thinking_llm)
         researchability_node = create_researchability_assessor(
             self.quick_thinking_llm
@@ -97,6 +105,9 @@ class GraphSetup:
         # Add other nodes
         workflow.add_node("Bull Researcher", bull_researcher_node)
         workflow.add_node("Bear Researcher", bear_researcher_node)
+        workflow.add_node("Blind Bull", blind_bull_node)
+        workflow.add_node("Blind Bear", blind_bear_node)
+        workflow.add_node("Evidence Ledger Builder", evidence_ledger_node)
         workflow.add_node("Research Manager", research_manager_node)
         workflow.add_node("Researchability Assessor", researchability_node)
         workflow.add_node("Falsification Auditor", falsification_node)
@@ -129,10 +140,13 @@ class GraphSetup:
             if i < len(plan.specs) - 1:
                 workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)
             else:
-                workflow.add_edge(current_clear, "Researchability Assessor")
+                workflow.add_edge(current_clear, "Evidence Ledger Builder")
 
         # Add remaining edges
-        workflow.add_edge("Researchability Assessor", "Bull Researcher")
+        workflow.add_edge("Evidence Ledger Builder", "Researchability Assessor")
+        workflow.add_edge("Researchability Assessor", "Blind Bull")
+        workflow.add_edge("Blind Bull", "Blind Bear")
+        workflow.add_edge("Blind Bear", "Bull Researcher")
         workflow.add_conditional_edges(
             "Bull Researcher",
             self.conditional_logic.should_continue_debate,

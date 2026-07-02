@@ -199,9 +199,10 @@ def _parse_news_from_html(html: str) -> list[dict]:
                 or row.css(".date::text").get()
                 or row.css("span.l5::text").get()
             )
+            summary_parts = row.css(".news_item_c span::text").getall()
             summary = (
-                row.css(".content::text").get()
-                or row.css(".news_item_c span:last-child::text").get()
+                " ".join(part.strip() for part in summary_parts if part.strip())
+                or row.css(".content::text").get()
                 or row.css("p::text").get()
                 or ""
             ).strip()

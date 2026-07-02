@@ -99,6 +99,9 @@ DEFAULT_CONFIG = _apply_env_overrides({
         _LEGACY_TRADINGAGENTS_HOME, "memory", "trading_memory.md"
     ),
     "ticker_memory_dir": os.getenv("FXXKSTOCK_TICKER_MEMORY_DIR", os.path.join("memory", "tickers")),
+    "calibration_memory_dir": os.getenv(
+        "FXXKSTOCK_CALIBRATION_MEMORY_DIR", os.path.join("memory", "calibration")
+    ),
     "ticker_memory_fundamentals_ttl_days": 30,
     "reports_dir": os.getenv("FXXKSTOCK_REPORTS_DIR", "reports"),
     # Optional cap on the number of resolved memory log entries. When set,

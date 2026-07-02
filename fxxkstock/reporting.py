@@ -129,6 +129,18 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
         research_dir = save_path / "2_research"
         debate = final_state["investment_debate_state"]
         research_parts = []
+        if final_state.get("blind_bull_argument"):
+            research_dir.mkdir(exist_ok=True)
+            (research_dir / "blind_bull.md").write_text(
+                final_state["blind_bull_argument"], encoding="utf-8"
+            )
+            research_parts.append(("Blind Bull", final_state["blind_bull_argument"]))
+        if final_state.get("blind_bear_argument"):
+            research_dir.mkdir(exist_ok=True)
+            (research_dir / "blind_bear.md").write_text(
+                final_state["blind_bear_argument"], encoding="utf-8"
+            )
+            research_parts.append(("Blind Bear", final_state["blind_bear_argument"]))
         if debate.get("bull_history"):
             research_dir.mkdir(exist_ok=True)
             (research_dir / "bull.md").write_text(debate["bull_history"], encoding="utf-8")
@@ -183,10 +195,24 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
     # 6. Anti-bias audit
     researchability = final_state.get("researchability_assessment") or {}
     falsification = final_state.get("falsification_audit") or {}
-    if researchability or falsification:
+    evidence_ledger = final_state.get("evidence_ledger") or {}
+    if researchability or falsification or evidence_ledger:
         audit_dir = save_path / "6_audit"
         audit_dir.mkdir(exist_ok=True)
         audit_parts = []
+        if evidence_ledger.get("markdown"):
+            (audit_dir / "evidence_ledger.md").write_text(
+                evidence_ledger["markdown"], encoding="utf-8"
+            )
+            (audit_dir / "evidence_ledger.json").write_text(
+                json.dumps(
+                    {k: v for k, v in evidence_ledger.items() if k != "markdown"},
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            audit_parts.append(evidence_ledger["markdown"])
         if researchability.get("markdown"):
             (audit_dir / "researchability.md").write_text(
                 researchability["markdown"], encoding="utf-8"
@@ -223,7 +249,11 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
             }
 
         audit_payload = {
-            "version": 1,
+            "version": 2,
+            "evidence_ledger": {
+                key: value for key, value in evidence_ledger.items()
+                if key != "markdown"
+            },
             "researchability": {
                 key: value for key, value in researchability.items()
                 if key != "markdown"
@@ -246,6 +276,37 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
             sections.append(
                 "## VI. Anti-Bias Audit\n\n" + "\n\n---\n\n".join(audit_parts)
             )
+
+    decision_metadata = final_state.get("portfolio_decision_metadata") or {}
+    if decision_metadata:
+        calibration_dir = save_path / "7_calibration"
+        calibration_dir.mkdir(exist_ok=True)
+        predictions = decision_metadata.get("predictions") or []
+        (calibration_dir / "prediction_snapshot.json").write_text(
+            json.dumps(
+                {
+                    "rating": decision_metadata.get("rating"),
+                    "data_confidence": decision_metadata.get("data_confidence"),
+                    "thesis_confidence": decision_metadata.get("thesis_confidence"),
+                    "execution_confidence": decision_metadata.get("execution_confidence"),
+                    "predictions": predictions,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        if predictions:
+            rows = [
+                "| Claim | Condition | Horizon | Confidence |",
+                "|---|---|---:|---|",
+                *[
+                    f"| {item['claim']} | {item['comparison']} {item['target_price']} | "
+                    f"{item['horizon_trading_days']} | {item['confidence']} |"
+                    for item in predictions
+                ],
+            ]
+            sections.append("## VII. Prediction Snapshot\n\n" + "\n".join(rows))
 
     # Write consolidated report
     header = f"# Trading Analysis Report: {ticker}\n\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"

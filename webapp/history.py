@@ -123,6 +123,8 @@ def read_report_sections(report_dir: Path) -> dict[str, str]:
     """Group the saved report tree into the UI's reader tabs."""
     summary = _read_text(report_dir / "5_portfolio" / "decision.md")
     thesis_parts = [
+        _read_text(report_dir / "2_research" / "blind_bull.md"),
+        _read_text(report_dir / "2_research" / "blind_bear.md"),
         _read_text(report_dir / "2_research" / "manager.md"),
         _read_text(report_dir / "3_trading" / "trader.md"),
     ]
@@ -138,6 +140,7 @@ def read_report_sections(report_dir: Path) -> dict[str, str]:
         _read_text(report_dir / "1_analysts" / "sentiment.md"),
     ]
     audit_parts = [
+        _read_text(report_dir / "6_audit" / "evidence_ledger.md"),
         _read_text(report_dir / "6_audit" / "researchability.md"),
         _read_text(report_dir / "6_audit" / "falsification.md"),
     ]
@@ -147,6 +150,7 @@ def read_report_sections(report_dir: Path) -> dict[str, str]:
         "risks": "\n\n---\n\n".join(part for part in risk_parts if part),
         "data": "\n\n---\n\n".join(part for part in data_parts if part),
         "audit": "\n\n---\n\n".join(part for part in audit_parts if part),
+        "calibration": "",
     }
 
 
@@ -273,10 +277,12 @@ def get_stock_overview(
     region = detect_market_region(ticker)
     identity = {} if is_cn_region(region) else dict(resolve_instrument_identity(ticker))
     region = detect_market_region(ticker, identity)
-    if is_cn_region(region) and not local_name:
+    if is_cn_region(region):
         cn_name = get_security_cn_name(ticker, region)
         if cn_name:
             identity["company_name"] = cn_name
+        elif local_name:
+            identity["company_name"] = local_name
     elif local_name:
         identity["company_name"] = local_name
 

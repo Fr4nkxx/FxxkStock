@@ -50,6 +50,13 @@ def test_write_report_tree_persists_anti_bias_audit(tmp_path):
                 "falsification_triggers": ["Revenue misses"],
                 "markdown": "**Requires Revision**: No",
             },
+            "evidence_ledger": {
+                "status": "available",
+                "claims": [{"claim_id": "E01", "claim": "Revenue grew"}],
+                "markdown": "# Evidence Ledger\n\nE01 Revenue grew",
+            },
+            "blind_bull_argument": "Blind bull E01.",
+            "blind_bear_argument": "Blind bear E01.",
             "initial_investment_plan": "INITIAL PLAN",
             "final_trade_decision": (
                 "**Data Confidence**: High\n"
@@ -65,6 +72,10 @@ def test_write_report_tree_persists_anti_bias_audit(tmp_path):
     payload = json.loads((tmp_path / "6_audit" / "audit.json").read_text())
     assert payload["researchability"]["information_grade"] == "B"
     assert payload["confidence"]["execution"]["level"] == "Low"
+    assert payload["evidence_ledger"]["claims"][0]["claim_id"] == "E01"
+    assert (tmp_path / "6_audit" / "evidence_ledger.json").is_file()
+    assert (tmp_path / "2_research" / "blind_bull.md").is_file()
+    assert (tmp_path / "2_research" / "blind_bear.md").is_file()
     assert (tmp_path / "6_audit" / "research_manager_initial.md").read_text() == "INITIAL PLAN"
     assert "Anti-Bias Audit" in out.read_text()
 

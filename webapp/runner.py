@@ -273,6 +273,12 @@ def _detect_report_sections(chunk: dict[str, Any], seen: set[str]) -> list[tuple
     if chunk.get("researchability_assessment") and "researchability" not in seen:
         seen.add("researchability")
         found.append(("researchability", "Researchability Assessor"))
+    if chunk.get("evidence_ledger") and "evidence_ledger" not in seen:
+        seen.add("evidence_ledger")
+        found.append(("evidence_ledger", "构建证据账本"))
+    if chunk.get("blind_bear_argument") and "blind_debate" not in seen:
+        seen.add("blind_debate")
+        found.append(("blind_debate", "Bull/Bear 独立盲评"))
 
     if chunk.get("falsification_audit") and "falsification_audit" not in seen:
         seen.add("falsification_audit")

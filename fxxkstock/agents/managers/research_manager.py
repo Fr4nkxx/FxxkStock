@@ -24,6 +24,9 @@ def create_research_manager(llm):
         researchability = (state.get("researchability_assessment") or {}).get(
             "markdown", ""
         )
+        evidence_ledger = (state.get("evidence_ledger") or {}).get("markdown", "")
+        blind_bull = state.get("blind_bull_argument", "")
+        blind_bear = state.get("blind_bear_argument", "")
 
         prompt = f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
 
@@ -45,11 +48,20 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
 **Debate History:**
 {history}
 
+**Independent Blind Arguments:**
+Bull: {blind_bull}
+
+Bear: {blind_bear}
+
+**Evidence Ledger (cite E IDs; identify omitted evidence explicitly):**
+{evidence_ledger}
+
 **AI Researchability Assessment:**
 {researchability}
 
 Calibrate certainty to the assessment, but do not treat sparse information as
-automatic bearish evidence.""" + get_report_instructions()
+automatic bearish evidence. Explicitly distinguish conclusions both sides
+reached independently from consensus or concessions formed after cross-examination.""" + get_report_instructions()
 
         investment_plan = invoke_structured_or_freetext(
             structured_llm,

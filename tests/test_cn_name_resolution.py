@@ -52,6 +52,59 @@ def test_get_security_cn_name_a_share_falls_back_to_cninfo():
 
 
 @pytest.mark.unit
+def test_get_security_cn_name_etf_uses_fund_source_and_cache(tmp_path):
+    with (
+        patch(
+            "fxxkstock.dataflows.market_utils._fetch_eastmoney_cn_name",
+            return_value=None,
+        ),
+        patch(
+            "fxxkstock.dataflows.market_utils._fetch_eastmoney_fund_cn_name",
+            return_value="易方达中证人工智能主题ETF",
+        ) as mock_fund,
+        patch(
+            "fxxkstock.dataflows.market_utils.get_config",
+            return_value={"data_cache_dir": str(tmp_path)},
+        ),
+    ):
+        name = get_security_cn_name("159819.SZ", "cn_a")
+
+    assert name == "易方达中证人工智能主题ETF"
+    mock_fund.assert_called_once_with("159819")
+    cache = json.loads(
+        (tmp_path / "security_names" / "cn_funds.json").read_text(encoding="utf-8")
+    )
+    assert cache["159819"] == name
+
+
+@pytest.mark.unit
+def test_get_security_cn_name_etf_uses_cached_chinese_name(tmp_path):
+    cache = tmp_path / "security_names" / "cn_funds.json"
+    cache.parent.mkdir(parents=True)
+    cache.write_text(
+        json.dumps({"159819": "易方达中证人工智能主题ETF"}),
+        encoding="utf-8",
+    )
+    with (
+        patch(
+            "fxxkstock.dataflows.market_utils._fetch_eastmoney_cn_name",
+            return_value=None,
+        ),
+        patch(
+            "fxxkstock.dataflows.market_utils._fetch_eastmoney_fund_cn_name"
+        ) as mock_fund,
+        patch(
+            "fxxkstock.dataflows.market_utils.get_config",
+            return_value={"data_cache_dir": str(tmp_path)},
+        ),
+    ):
+        name = get_security_cn_name("159819.SZ", "cn_a")
+
+    assert name == "易方达中证人工智能主题ETF"
+    mock_fund.assert_not_called()
+
+
+@pytest.mark.unit
 def test_get_security_cn_name_adr_eastmoney():
     with patch(
         "fxxkstock.dataflows.market_utils._fetch_eastmoney_cn_name",

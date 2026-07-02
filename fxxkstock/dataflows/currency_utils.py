@@ -257,5 +257,5 @@ def convert_insider_frame(
             "value",
             "price",
         }:
-            out[col] = pd.to_numeric(out[col], errors="coerce") * rate
+            out[col] = (pd.to_numeric(out[col], errors="coerce") * rate).round(6)
     return out
