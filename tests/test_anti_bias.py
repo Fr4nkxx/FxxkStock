@@ -69,7 +69,7 @@ def test_researchability_schema_and_node_render():
     result = create_researchability_assessor(_llm_with_result(assessment))(_state())
     payload = result["researchability_assessment"]
     assert payload["information_grade"] == "B"
-    assert "**Information Grade**: B" in payload["markdown"]
+    assert "**信息等级 / Information Grade**: B" in payload["markdown"]
     assert "Customer concentration" in render_researchability(assessment)
 
 

@@ -97,8 +97,8 @@ def _extract_instrument_name(markdown: str, ticker: str) -> str | None:
     """Best-effort local name extraction without another market-data request."""
     bare = re.escape(ticker.split(".")[0])
     patterns = (
-        rf"([^\n|]{{2,100}})\s*[（(]{bare}(?:\.(?:SS|SZ|HK))?[）)]",
         rf"{bare}(?:\.(?:SS|SZ|HK))?\s*[（(]([^）)\n]{{2,80}})[）)]",
+        rf"([^\n|]{{2,100}})\s*[（(]{bare}(?:\.(?:SS|SZ|HK))?[）)]",
         r"(?:标的|公司|基金名称)\s*[：:*]*\s*([^|\n（(]{2,80})",
     )
     rejected = {"分析日期", "最近交易日", "已验证", "股票", "证券", "ETF"}
@@ -108,7 +108,10 @@ def _extract_instrument_name(markdown: str, ticker: str) -> str | None:
             continue
         name = re.sub(r"[*#`]", "", match.group(1))
         name = re.sub(r"^[^\w\u4e00-\u9fff]+", "", name).strip(" ：:|-（(")
-        if re.search(r"(?:报告|标的|公司|基金名称)\s*[：:]", name):
+        if re.search(
+            r"(?:总体判断|综合判断|核心判断|报告对象|报告|标的|公司|基金名称)\s*[：:]",
+            name,
+        ):
             name = re.split(r"[：:]", name)[-1].strip()
         if name and name.upper() != ticker and name not in rejected:
             return name
