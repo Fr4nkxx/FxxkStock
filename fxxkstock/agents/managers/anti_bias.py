@@ -18,6 +18,7 @@ from fxxkstock.agents.schemas import (
 )
 from fxxkstock.agents.utils.agent_utils import (
     get_instrument_context_from_state,
+    get_language_instruction,
     get_report_instructions,
 )
 from fxxkstock.agents.utils.structured import bind_structured
@@ -58,7 +59,11 @@ NEWS REPORT:
 {state.get("news_report", "")}
 
 FUNDAMENTALS REPORT:
-{state.get("fundamentals_report", "")}"""
+{state.get("fundamentals_report", "")}
+
+Write all human-readable claim text, counter-evidence, and missing-evidence
+descriptions in the configured report language. Keep only enum values and
+claim_id in their schema-defined form.{get_language_instruction()}"""
         try:
             if structured_llm is None:
                 raise ValueError("structured output unavailable")
@@ -82,9 +87,8 @@ FUNDAMENTALS REPORT:
                     ],
                     "markdown": (
                         "# 证据账本 / Evidence Ledger\n\n"
-                        "> Evidence ledger unavailable. Downstream agents must "
-                        "work directly from the analyst reports and must not "
-                        "invent claim IDs."
+                        "> 结构化证据账本不可用。下游 Agent 必须直接使用分析师"
+                        "报告，且不得虚构 claim_id。"
                     ),
                 }
             }
@@ -127,7 +131,10 @@ EVIDENCE LEDGER:
 
 Grade A when evidence is broad, current, and independently corroborated.
 Grade B when meaningful gaps or inference remain. Grade C when decisive facts
-are sparse. Explicitly identify homogeneous-source consensus risk."""
+are sparse. Explicitly identify homogeneous-source consensus risk.
+Write every explanatory text field in the configured report language; keep
+only the A/B/C and Low/Medium/High enum values unchanged.
+{get_language_instruction()}"""
 
         if structured_llm is not None:
             try:
@@ -150,9 +157,8 @@ are sparse. Explicitly identify homogeneous-source consensus risk."""
         text = str(getattr(response, "content", response)).strip()
         markdown = (
             "# 可研究性评估 / Researchability Assessment\n\n"
-            "**Information Grade**: Unavailable\n\n"
-            "> Structured assessment unavailable; downstream agents must use "
-            "the evidence conservatively.\n\n"
+            "**信息等级**: 未评估\n\n"
+            "> 结构化评估不可用；下游 Agent 必须保守使用现有证据。\n\n"
             f"{text}"
         )
         return {
@@ -161,7 +167,7 @@ are sparse. Explicitly identify homogeneous-source consensus risk."""
                 "information_grade": None,
                 "markdown": markdown,
                 "research_limitations": [
-                    "Structured researchability assessment was unavailable."
+                    "结构化可研究性评估不可用。"
                 ],
             }
         }
@@ -206,7 +212,11 @@ BULL/BEAR DEBATE:
 {state.get("investment_debate_state", {}).get("history", "")}
 
 RESEARCH MANAGER INITIAL PLAN:
-{initial_plan}"""
+{initial_plan}
+
+Write every explanatory audit field in the configured report language. Keep
+only boolean and schema enum values in their required machine-readable form.
+{get_language_instruction()}"""
 
         if structured_llm is not None:
             try:
@@ -238,7 +248,7 @@ RESEARCH MANAGER INITIAL PLAN:
                 "falsification_triggers": [],
                 "markdown": (
                     "# 证伪审计 / Falsification Audit\n\n"
-                    "**Requires Revision**: No (structured routing unavailable)\n\n"
+                    "**是否需要修正**: 否（结构化路由不可用）\n\n"
                     f"{text}"
                 ),
             },

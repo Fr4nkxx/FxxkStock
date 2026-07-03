@@ -376,6 +376,31 @@ def test_stock_overview_groups_reports_and_calculates_change(tmp_path):
 
 
 @pytest.mark.unit
+def test_report_name_extraction_prefers_ticker_parenthesized_name():
+    from webapp.history import _extract_instrument_name
+
+    markdown = """
+# Trading Analysis Report: 000725.SZ
+# 深度技术分析报告：000725.SZ（京东方A）
+> **总体判断**：京东方A（000725.SZ）处于强趋势中。
+"""
+    assert _extract_instrument_name(markdown, "000725.SZ") == "京东方A"
+
+
+@pytest.mark.unit
+def test_analysis_progress_is_rendered_inside_stock_card():
+    html = (Path(__file__).parents[1] / "webapp" / "static" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert 'class="analysis-strip"' not in html
+    assert "stock-run-track" in html
+    assert "stock-run-fill" in html
+    assert "stock-run-stage" in html
+    assert "group.activeRun.percent" in html
+    assert 'id="debugBtn"' in html
+
+
+@pytest.mark.unit
 def test_stock_overview_uses_daily_bar_for_quote_cards(tmp_path):
     intraday = pd.DataFrame(
         {

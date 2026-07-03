@@ -172,7 +172,7 @@ def normalize_evidence_ledger(ledger: EvidenceLedger) -> EvidenceLedger:
 
 def render_evidence_ledger(ledger: EvidenceLedger) -> str:
     rows = [
-        "| ID | Claim | Type | Direction | Status | Confidence | Sources | Date | Counter-evidence |",
+        "| ID | 主张 | 类型 | 方向 | 状态 | 置信度 | 独立来源数 | 日期 | 反证 |",
         "|---|---|---|---|---|---|---:|---|---|",
     ]
     for item in ledger.claims:
@@ -186,7 +186,7 @@ def render_evidence_ledger(ledger: EvidenceLedger) -> str:
     missing = "\n".join(f"- {item}" for item in ledger.omitted_or_missing_evidence)
     return "\n".join(
         ["# 证据账本 / Evidence Ledger", "", *(rows or ["No claims extracted."]), "",
-         "## Missing or Omitted Evidence", missing or "- None identified"]
+         "## 缺失或遗漏的证据", missing or "- 未发现"]
     )
 
 
@@ -236,22 +236,22 @@ def render_researchability(assessment: ResearchabilityAssessment) -> str:
     return "\n".join([
         "# 可研究性评估 / Researchability Assessment",
         "",
-        f"**Information Grade**: {assessment.information_grade.value}",
+        f"**信息等级 / Information Grade**: {assessment.information_grade.value}",
         "",
-        f"**Source Diversity**: {assessment.source_diversity.value}",
+        f"**来源多样性 / Source Diversity**: {assessment.source_diversity.value}",
         "",
-        f"**Consensus Risk**: {assessment.consensus_risk.value}",
+        f"**共识风险 / Consensus Risk**: {assessment.consensus_risk.value}",
         "",
-        "## Critical Missing Data",
+        "## 关键数据缺口",
         bullets(assessment.critical_missing_data),
         "",
-        "## Inferred Claims",
+        "## 主要推断性结论",
         bullets(assessment.inferred_claims),
         "",
-        "## Research Limitations",
+        "## AI 研究局限",
         bullets(assessment.research_limitations),
         "",
-        f"## Recommended Posture\n{assessment.recommended_posture}",
+        f"## 建议的保守程度\n{assessment.recommended_posture}",
     ])
 
 
@@ -291,27 +291,27 @@ def render_falsification_audit(audit: FalsificationAudit) -> str:
     return "\n".join([
         "# 证伪审计 / Falsification Audit",
         "",
-        f"**Requires Revision**: {'Yes' if audit.requires_revision else 'No'}",
+        f"**是否需要修正 / Requires Revision**: {'是' if audit.requires_revision else '否'}",
         "",
-        "## Strongest Counter-Thesis",
+        "## 最强反方论点",
         audit.strongest_counter_thesis,
         "",
-        "## Conflicting or Ignored Evidence",
+        "## 冲突或被忽略的证据",
         bullets(audit.conflicting_or_ignored_evidence),
         "",
-        "## Hidden Assumptions",
+        "## 隐含假设",
         bullets(audit.hidden_assumptions),
         "",
-        "## Bias Flags",
+        "## 偏误标记",
         bullets(audit.bias_flags),
         "",
-        "## Falsification Triggers",
+        "## 可证伪条件",
         bullets(audit.falsification_triggers),
         "",
-        "## Critical Findings",
+        "## 严重问题",
         bullets(audit.critical_findings),
         "",
-        "## Revision Instructions",
+        "## 修正指令",
         bullets(audit.revision_instructions),
     ])
 
