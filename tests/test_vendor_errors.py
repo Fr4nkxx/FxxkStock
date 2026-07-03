@@ -23,6 +23,8 @@ from fxxkstock.dataflows.errors import (
     VendorRateLimitError,
 )
 from fxxkstock.dataflows.fred import FredNotConfiguredError
+from fxxkstock.dataflows.stockstats_utils import yf_retry
+from yfinance.exceptions import YFRateLimitError
 
 
 @pytest.mark.unit
@@ -48,6 +50,10 @@ class HierarchyTests(unittest.TestCase):
         )
         self.assertIs(ReExported, NoMarketDataError)
 
+    def test_yfinance_rate_limit_is_translated_to_vendor_error(self):
+        with self.assertRaises(VendorRateLimitError):
+            yf_retry(lambda: (_ for _ in ()).throw(YFRateLimitError()), max_retries=0)
+
 
 @pytest.mark.unit
 class RouterHandlesBaseTypesTests(unittest.TestCase):
@@ -71,6 +77,19 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
         ):
             out = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
         self.assertEqual(out, "YF")
+
+    def test_sole_rate_limited_vendor_surfaces_the_error(self):
+        set_config({"data_vendors": {"core_stock_apis": "yfinance"}})
+
+        def _throttled(*a, **k):
+            raise VendorRateLimitError("slow down")
+
+        with mock.patch.dict(
+            interface.VENDOR_METHODS,
+            {"get_stock_data": {"yfinance": _throttled}},
+            clear=False,
+        ), self.assertRaises(VendorRateLimitError):
+            interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
 
     def test_not_configured_falls_through_to_next_vendor(self):
         set_config({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
