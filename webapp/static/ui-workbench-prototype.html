@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FxxKStock 工作台原型</title>
+  <link rel="icon" type="image/png" sizes="64x64" href="./favicon.png" />
+  <link rel="apple-touch-icon" href="./fxxkstock-icon.png" />
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0d10;
+      --shell: #0f1418;
+      --shell-2: #141a20;
+      --panel: #171e24;
+      --panel-2: #1c252c;
+      --panel-3: #222c34;
+      --line: #2d3943;
+      --line-soft: #202a32;
+      --text: #edf3f6;
+      --text-soft: #c8d4da;
+      --muted: #8b9aa4;
+      --faint: #65747d;
+      --accent: #3ba58a;
+      --accent-soft: rgba(59, 165, 138, .16);
+      --blue: #5187d7;
+      --blue-soft: rgba(81, 135, 215, .16);
+      --amber: #d6a642;
+      --amber-soft: rgba(214, 166, 66, .16);
+      --red: #e76f61;
+      --red-soft: rgba(231, 111, 97, .14);
+      --green: #6abd79;
+      --green-soft: rgba(106, 189, 121, .14);
+      --violet: #9a82d6;
+      --shadow: 0 18px 50px rgba(0, 0, 0, .28);
+      --sidebar: 304px;
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      font-size: 13px;
+      letter-spacing: 0;
+    }
+
+    button,
+    input {
+      font: inherit;
+      color: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .icon {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+    }
+
+    .prototype {
+      width: 100%;
+      height: 100dvh;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: var(--sidebar) minmax(0, 1fr);
+      background:
+        radial-gradient(circle at 72% 12%, rgba(59, 165, 138, .09), transparent 32%),
+        linear-gradient(180deg, #0d1115 0%, #080b0e 100%);
+    }
+
+    .sidebar {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--line);
+      background: rgba(13, 18, 22, .96);
+    }
+
+    .brand {
+      height: 60px;
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line-soft);
+      font-size: 17px;
+      font-weight: 760;
+    }
+
+    .brand img {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+    }
+
+    .brand small {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .mobile-menu {
+      display: none;
+      width: 34px;
+      height: 34px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+    }
+
+    .side-tools {
+      flex: 0 0 auto;
+      padding: 12px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .primary-btn,
+    .ghost-btn,
+    .icon-btn {
+      height: 36px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+
+    .primary-btn {
+      padding: 0 14px;
+      background: var(--accent);
+      color: #06100d;
+      font-weight: 760;
+    }
+
+    .ghost-btn {
+      padding: 0 12px;
+      background: var(--panel);
+      border-color: var(--line);
+      color: var(--text-soft);
+    }
+
+    .icon-btn {
+      width: 36px;
+      padding: 0;
+      background: var(--panel);
+      border-color: var(--line);
+      color: var(--muted);
+    }
+
+    .search {
+      position: relative;
+      margin-top: 10px;
+    }
+
+    .search .icon {
+      position: absolute;
+      left: 10px;
+      top: 10px;
+      color: var(--faint);
+    }
+
+    .search input {
+      width: 100%;
+      height: 36px;
+      padding: 0 10px 0 34px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      outline: 0;
+      background: #10161b;
+    }
+
+    .search input:focus {
+      border-color: rgba(59, 165, 138, .8);
+    }
+
+    .side-section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 13px 14px 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 760;
+      text-transform: uppercase;
+    }
+
+    .side-section-title span:last-child {
+      color: var(--faint);
+      font-weight: 650;
+      text-transform: none;
+    }
+
+    .watchlist {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 0 8px 14px;
+    }
+
+    .watch-item {
+      width: 100%;
+      min-height: 82px;
+      margin-bottom: 6px;
+      padding: 10px;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      background: transparent;
+      text-align: left;
+    }
+
+    .watch-item:hover {
+      background: rgba(255, 255, 255, .035);
+    }
+
+    .watch-item.active {
+      border-color: rgba(59, 165, 138, .42);
+      background: var(--accent-soft);
+    }
+
+    .watch-top,
+    .watch-meta,
+    .watch-foot {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .watch-top strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 14px;
+    }
+
+    .watch-top span {
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .watch-meta {
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .watch-foot {
+      justify-content: space-between;
+      margin-top: 8px;
+      color: var(--faint);
+      font-size: 11px;
+    }
+
+    .run-track {
+      height: 5px;
+      flex: 1;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #2b363d;
+    }
+
+    .run-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: var(--blue);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 0;
+      min-height: 19px;
+      padding: 2px 7px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      overflow: hidden;
+      font-size: 10px;
+      font-weight: 780;
+      line-height: 1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .badge.green { color: var(--green); background: var(--green-soft); }
+    .badge.red { color: var(--red); background: var(--red-soft); }
+    .badge.amber { color: var(--amber); background: var(--amber-soft); }
+    .badge.blue { color: var(--blue); background: var(--blue-soft); }
+    .badge.violet { color: var(--violet); background: rgba(154, 130, 214, .14); }
+    .badge.neutral { color: var(--muted); background: rgba(139, 154, 164, .1); }
+
+    .main {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .topbar {
+      height: 68px;
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(13, 18, 22, .9);
+      backdrop-filter: blur(12px);
+    }
+
+    .title-block {
+      min-width: 0;
+      margin-right: auto;
+    }
+
+    .title-block h1 {
+      margin: 0;
+      overflow: hidden;
+      color: var(--text);
+      font-size: 21px;
+      line-height: 1.2;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .title-block p {
+      margin: 6px 0 0;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .theme-note {
+      height: 26px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(255, 255, 255, .025);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .content {
+      min-height: 0;
+      overflow-y: auto;
+      padding: 18px;
+    }
+
+    .decision-grid {
+      display: grid;
+      grid-template-columns: minmax(280px, 1.1fr) minmax(260px, .85fr) minmax(260px, .85fr);
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .panel {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(23, 30, 36, .92);
+      box-shadow: var(--shadow);
+    }
+
+    .decision-hero {
+      padding: 18px;
+      border-color: rgba(59, 165, 138, .34);
+      background:
+        linear-gradient(135deg, rgba(59, 165, 138, .15), transparent 38%),
+        rgba(23, 30, 36, .96);
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 14px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 760;
+      text-transform: uppercase;
+    }
+
+    .panel-title > * {
+      min-width: 0;
+    }
+
+    .panel-title > span:last-child {
+      max-width: 58%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .decision-rating {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .decision-rating strong {
+      color: var(--text);
+      font-size: clamp(30px, 4vw, 46px);
+      line-height: .94;
+      letter-spacing: 0;
+    }
+
+    .decision-rating span {
+      margin-bottom: 5px;
+      color: var(--text-soft);
+      font-size: 16px;
+      font-weight: 720;
+    }
+
+    .decision-copy {
+      margin: 14px 0 16px;
+      max-width: 70ch;
+      color: var(--text-soft);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .metric-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+      gap: 8px;
+    }
+
+    .metric {
+      min-height: 64px;
+      padding: 9px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, .025);
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 7px;
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+
+    .change-panel,
+    .action-panel,
+    .market-panel,
+    .progress-panel {
+      padding: 15px;
+    }
+
+    .change-list,
+    .action-list,
+    .risk-list,
+    .event-list {
+      display: grid;
+      gap: 9px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .change-list li,
+    .action-list li,
+    .risk-list li,
+    .event-list li {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+      color: var(--text-soft);
+      line-height: 1.45;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      margin-top: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .dot.amber { background: var(--amber); }
+    .dot.red { background: var(--red); }
+    .dot.blue { background: var(--blue); }
+
+    .market-progress-grid {
+      display: grid;
+      grid-template-columns: minmax(320px, .9fr) minmax(420px, 1.1fr);
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .market-summary {
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr);
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .price-box {
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, .025);
+    }
+
+    .price-box span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .price-box strong {
+      display: block;
+      margin-top: 10px;
+      font-size: 28px;
+      line-height: 1;
+    }
+
+    .price-box em {
+      display: block;
+      margin-top: 8px;
+      color: var(--green);
+      font-style: normal;
+      font-weight: 720;
+    }
+
+    .chart-wrap {
+      min-width: 0;
+      height: 138px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: #11181d;
+      padding: 8px;
+    }
+
+    .chart-wrap canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .quote-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .quote-cell {
+      min-height: 52px;
+      padding: 8px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, .025);
+    }
+
+    .quote-cell span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .quote-cell strong {
+      display: block;
+      margin-top: 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stage-line {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 13px;
+    }
+
+    .stage {
+      min-height: 76px;
+      padding: 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, .025);
+    }
+
+    .stage.done {
+      border-color: rgba(106, 189, 121, .34);
+      background: var(--green-soft);
+    }
+
+    .stage.active {
+      border-color: rgba(81, 135, 215, .5);
+      background: var(--blue-soft);
+    }
+
+    .stage span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 760;
+      text-transform: uppercase;
+    }
+
+    .stage strong {
+      display: block;
+      margin-top: 8px;
+      overflow: hidden;
+      color: var(--text-soft);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .progress-footer {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .progress-bar {
+      height: 7px;
+      flex: 1;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #2b363d;
+    }
+
+    .progress-bar span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--blue);
+    }
+
+    .reader-shell {
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .reader-nav {
+      min-width: 0;
+      padding: 10px;
+      align-self: start;
+      position: sticky;
+      top: 0;
+    }
+
+    .reader-nav h2,
+    .reader-body h2 {
+      margin: 0 0 12px;
+      font-size: 15px;
+    }
+
+    .section-btn {
+      width: 100%;
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+      padding: 0 10px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text-soft);
+      text-align: left;
+    }
+
+    .section-btn:hover {
+      background: rgba(255, 255, 255, .035);
+    }
+
+    .section-btn.active {
+      border-color: rgba(59, 165, 138, .42);
+      background: var(--accent-soft);
+      color: var(--text);
+    }
+
+    .section-btn span:first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .reader-body {
+      min-width: 0;
+      overflow-x: auto;
+      padding: 18px;
+    }
+
+    .reader-kicker {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 760;
+      text-transform: uppercase;
+    }
+
+    .reader-body h3 {
+      margin: 0 0 12px;
+      font-size: 22px;
+      line-height: 1.25;
+    }
+
+    .reader-body p {
+      margin: 0 0 12px;
+      color: var(--text-soft);
+      font-size: 14px;
+      line-height: 1.75;
+    }
+
+    .reader-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+    }
+
+    .reader-body th,
+    .reader-body td {
+      padding: 10px;
+      border-bottom: 1px solid var(--line-soft);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .reader-body th {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 760;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, .025);
+    }
+
+    .reader-body tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .mobile-backdrop {
+      display: none;
+    }
+
+    @media (max-width: 1160px) {
+      .decision-grid {
+        grid-template-columns: minmax(0, 1fr) minmax(260px, .78fr);
+      }
+
+      .action-panel {
+        grid-column: 1 / -1;
+      }
+
+      .market-progress-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 860px) {
+      body {
+        overflow: auto;
+        overflow-x: hidden;
+      }
+
+      .prototype {
+        min-height: 100dvh;
+        height: auto;
+        display: block;
+      }
+
+      .sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        z-index: 20;
+        width: min(86vw, 318px);
+        transform: translateX(-102%);
+        transition: transform .22s ease;
+        box-shadow: var(--shadow);
+      }
+
+      body.sidebar-open .sidebar {
+        transform: translateX(0);
+      }
+
+      body.sidebar-open .mobile-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 19;
+        background: rgba(0, 0, 0, .55);
+      }
+
+      .brand small {
+        display: none;
+      }
+
+      .main {
+        min-height: 100dvh;
+      }
+
+      .mobile-menu {
+        display: inline-flex;
+      }
+
+      .topbar {
+        height: auto;
+        min-height: 64px;
+        flex-wrap: wrap;
+        padding: 10px 12px;
+      }
+
+      .title-block {
+        order: 2;
+        width: calc(100% - 48px);
+      }
+
+      .topbar > .ghost-btn,
+      .topbar > .primary-btn,
+      .theme-note {
+        display: none;
+      }
+
+      .content {
+        padding: 12px;
+        overflow-x: hidden;
+      }
+
+      .decision-grid,
+      .market-progress-grid,
+      .reader-shell,
+      .market-summary {
+        grid-template-columns: 1fr;
+      }
+
+      .decision-grid > *,
+      .market-progress-grid > *,
+      .reader-shell > * {
+        min-width: 0;
+      }
+
+      .panel-title > span:last-child {
+        max-width: 48%;
+      }
+
+      .metric-row,
+      .quote-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .stage-line {
+        grid-template-columns: 1fr;
+      }
+
+      .reader-nav {
+        position: static;
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+      }
+
+      .reader-nav h2 {
+        display: none;
+      }
+
+      .section-btn {
+        width: auto;
+        min-width: 120px;
+        margin-bottom: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype">
+    <aside class="sidebar" aria-label="研究标的池">
+      <div class="brand">
+        <img src="./fxxkstock-icon.png" alt="" />
+        <span>FxxKStock</span>
+        <small>Workbench Prototype</small>
+      </div>
+
+      <div class="side-tools">
+        <button class="primary-btn" type="button"><i data-lucide="plus" class="icon"></i>新建分析</button>
+        <div class="search">
+          <i data-lucide="search" class="icon"></i>
+          <input type="search" value="" placeholder="搜索自选标的" aria-label="搜索自选标的" />
+        </div>
+      </div>
+
+      <div class="side-section-title"><span>今日研究池</span><span>浏览器本地</span></div>
+      <div class="watchlist" id="watchlist"></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobileMenu" type="button" aria-label="打开研究池"><i data-lucide="menu" class="icon"></i></button>
+        <div class="title-block">
+          <h1 id="instrumentTitle">-</h1>
+          <p id="instrumentMeta">-</p>
+        </div>
+        <span class="theme-note"><i data-lucide="palette" class="icon"></i>暗色成品，浅色变量预留</span>
+        <button class="ghost-btn" type="button"><i data-lucide="history" class="icon"></i>历史版本</button>
+        <button class="primary-btn" type="button"><i data-lucide="refresh-cw" class="icon"></i>重新分析</button>
+        <button class="icon-btn" type="button" aria-label="设置"><i data-lucide="settings" class="icon"></i></button>
+      </header>
+
+      <div class="content">
+        <section class="decision-grid" aria-label="第一屏决策区">
+          <article class="panel decision-hero">
+            <div class="panel-title">
+              <span>今日结论</span>
+              <span class="badge" id="decisionBadge">-</span>
+            </div>
+            <div class="decision-rating">
+              <strong id="decisionRating">-</strong>
+              <span id="decisionLabel">-</span>
+            </div>
+            <p class="decision-copy" id="decisionCopy">-</p>
+            <div class="metric-row">
+              <div class="metric"><span>目标价</span><strong id="targetPrice">-</strong></div>
+              <div class="metric"><span>时间范围</span><strong id="horizon">-</strong></div>
+              <div class="metric"><span>信息等级</span><strong id="infoGrade">-</strong></div>
+              <div class="metric"><span>论点置信度</span><strong id="confidence">-</strong></div>
+            </div>
+          </article>
+
+          <article class="panel change-panel">
+            <div class="panel-title">
+              <span>相对上次变化</span>
+              <span id="lastRun">-</span>
+            </div>
+            <ul class="change-list" id="changeList"></ul>
+          </article>
+
+          <article class="panel action-panel">
+            <div class="panel-title">
+              <span>下一步动作</span>
+              <span class="badge blue">复盘行动</span>
+            </div>
+            <ul class="action-list" id="actionList"></ul>
+          </article>
+        </section>
+
+        <section class="market-progress-grid" aria-label="行情与运行态">
+          <article class="panel market-panel">
+            <div class="panel-title">
+              <span>行情辅助判断</span>
+              <span id="marketAsOf">-</span>
+            </div>
+            <div class="market-summary">
+              <div class="price-box">
+                <span>最新价</span>
+                <strong id="lastPrice">-</strong>
+                <em id="priceChange">-</em>
+              </div>
+              <div class="chart-wrap"><canvas id="sparkline" aria-label="价格走势"></canvas></div>
+            </div>
+            <div class="quote-strip" id="quoteStrip"></div>
+          </article>
+
+          <article class="panel progress-panel">
+            <div class="panel-title">
+              <span>运行态</span>
+              <span id="runStatus">-</span>
+            </div>
+            <div class="stage-line" id="stageLine"></div>
+            <ul class="event-list" id="eventList"></ul>
+            <div class="progress-footer">
+              <span id="progressText">-</span>
+              <div class="progress-bar"><span id="progressFill"></span></div>
+            </div>
+          </article>
+        </section>
+
+        <section class="reader-shell" aria-label="报告阅读区">
+          <nav class="panel reader-nav" id="readerNav" aria-label="报告目录">
+            <h2>研究目录</h2>
+          </nav>
+          <article class="panel reader-body">
+            <div class="reader-kicker"><i data-lucide="book-open" class="icon"></i><span id="readerKicker">-</span></div>
+            <div id="readerContent"></div>
+          </article>
+        </section>
+      </div>
+    </main>
+  </div>
+  <div class="mobile-backdrop" id="mobileBackdrop"></div>
+
+  <script>
+    const stocks = [
+      {
+        ticker: "600353.SS",
+        name: "旭光电子",
+        note: "军工电子观察池",
+        rating: "HOLD",
+        label: "谨慎持有",
+        tone: "amber",
+        decision: "等待催化",
+        summary: "结论维持谨慎持有。短期价格已经反映一部分订单预期，基本面弹性仍在，但新闻热度和资金动能尚未形成一致确认。当前更适合跟踪验证，而不是主动提高仓位。",
+        target: "21.80",
+        horizon: "20 个交易日",
+        infoGrade: "B",
+        confidence: "71%",
+        lastRun: "今天 09:42",
+        asOf: "行情更新 15 分钟前",
+        price: "19.46",
+        change: "+1.24%",
+        quote: [["今开", "19.18"], ["52周高", "25.31"], ["量比", "1.12"], ["换手", "2.84%"]],
+        spark: [18.9, 19.0, 19.2, 19.1, 19.42, 19.35, 19.46, 19.54, 19.37, 19.46],
+        changes: [
+          ["amber", "评级不变，但目标价从 22.50 下修到 21.80，主要来自情绪热度降温。"],
+          ["blue", "数据置信度提升到 78%，财务与行情数据源已经恢复稳定。"],
+          ["red", "新增风险：主题交易拥挤度上升，若成交量回落，短线回撤概率提高。"]
+        ],
+        actions: [
+          ["blue", "明日优先检查成交量是否继续高于 20 日均值。"],
+          ["amber", "若价格跌破 18.90，重新触发深度分析。"],
+          ["green", "如果公告或订单新闻出现确认，再考虑把研究深度切到复杂。"]
+        ],
+        run: {
+          active: true,
+          percent: 68,
+          status: "分析中 · 证据审计阶段",
+          stages: [
+            ["done", "Market", "行情完成"],
+            ["done", "News", "新闻完成"],
+            ["done", "Debate", "多空辩论"],
+            ["active", "Audit", "证据审计"],
+            ["todo", "Decision", "最终决策"]
+          ],
+          events: [
+            ["blue", "正在核对关键证据与来源覆盖。"],
+            ["green", "已完成多空观点交叉质询。"],
+            ["amber", "新闻数据存在轻微延迟，已降级为辅助证据。"]
+          ]
+        },
+        sections: {
+          summary: {
+            title: "执行摘要",
+            kicker: "Summary",
+            body: [
+              "当前结论不是看多或看空，而是等待验证。报告的重点应放在三个问题：订单预期是否继续兑现，资金是否持续参与，以及下方关键价位是否被有效守住。",
+              "相比上一版，系统没有改变评级，但降低了目标价，并把“交易拥挤”列为需要每日检查的首要风险。"
+            ],
+            table: [["评级", "HOLD / 谨慎持有"], ["核心触发", "成交量继续高于 20 日均值"], ["失效条件", "跌破 18.90 且量能回落"]]
+          },
+          thesis: {
+            title: "投资逻辑",
+            kicker: "Thesis",
+            body: [
+              "正向逻辑来自行业订单和主题关注度，但目前还缺少能够支持估值继续上修的强确认信号。",
+              "更合适的研究动作是保留在观察池，并用成交量、公告和新闻验证下一轮分析是否值得升级。"
+            ]
+          },
+          risks: {
+            title: "关键风险",
+            kicker: "Risks",
+            body: [
+              "第一风险是主题交易回落导致估值压缩；第二风险是短期信息不充分，导致模型对目标价过度依赖历史波动。",
+              "如果未来两天没有新的订单或公告确认，当前结论应继续偏防守。"
+            ]
+          },
+          evidence: {
+            title: "证据依据",
+            kicker: "Evidence",
+            body: [
+              "证据层第一版以可扫读为目标，不把所有原始 Markdown 堆在第一屏。每条证据后续可以扩展为来源、时间、可靠性和对结论的影响。",
+              "行情、新闻、基本面和情绪数据应分开标记权重，避免用户把辅助证据误读成主要证据。"
+            ]
+          },
+          audit: {
+            title: "反偏见审计",
+            kicker: "Audit",
+            body: [
+              "审计区保留但默认不抢占第一屏。它应该回答：这个结论最可能错在哪里，哪些数据缺失，以及什么信号会推翻当前判断。",
+              "本次主要偏见风险是近期上涨后的确认偏误。"
+            ]
+          }
+        }
+      },
+      {
+        ticker: "AAPL",
+        name: "Apple Inc.",
+        note: "长期核心观察",
+        rating: "BUY",
+        label: "买入",
+        tone: "green",
+        decision: "等待买点",
+        summary: "结论为买入，但执行上不追价。服务收入和现金流质量仍然支撑长期判断，短期重点观察新品周期和估值消化。",
+        target: "238.00",
+        horizon: "45 个交易日",
+        infoGrade: "A",
+        confidence: "82%",
+        lastRun: "昨天 22:10",
+        asOf: "行情更新 8 分钟前",
+        price: "212.44",
+        change: "+0.58%",
+        quote: [["今开", "211.80"], ["52周高", "237.23"], ["PE", "31.4"], ["Beta", "1.17"]],
+        spark: [207, 209, 208, 211, 210, 212, 213, 212, 214, 212.44],
+        changes: [
+          ["green", "评级从 HOLD 上调为 BUY，主要因为服务收入韧性强于上一版假设。"],
+          ["blue", "信息等级提升到 A，关键数据源覆盖更完整。"],
+          ["amber", "执行建议仍偏耐心，当前价格距离理想买点仍有距离。"]
+        ],
+        actions: [
+          ["green", "回调到 205 附近时重新检查估值吸引力。"],
+          ["blue", "下次财报前重点跟踪服务收入与毛利率。"],
+          ["amber", "若硬件增长继续放缓，降低目标价弹性。"]
+        ],
+        run: {
+          active: false,
+          percent: 100,
+          status: "最近报告已完成",
+          stages: [
+            ["done", "Market", "行情完成"],
+            ["done", "News", "新闻完成"],
+            ["done", "Debate", "多空辩论"],
+            ["done", "Audit", "证据审计"],
+            ["done", "Decision", "最终决策"]
+          ],
+          events: [
+            ["green", "最近报告已生成，可直接阅读摘要。"],
+            ["blue", "预测校准中有 2 条到期记录可复盘。"]
+          ]
+        },
+        sections: {
+          summary: {
+            title: "执行摘要",
+            kicker: "Summary",
+            body: [
+              "买入结论来自稳定现金流、服务收入质量和较强股东回报。当前更像长期持有型标的，而不是短线事件驱动交易。",
+              "第一屏应提醒用户：结论积极，但动作仍是等待合适价格。"
+            ],
+            table: [["评级", "BUY / 买入"], ["核心触发", "回调到 205 附近"], ["主要风险", "硬件增长低于预期"]]
+          },
+          thesis: { title: "投资逻辑", kicker: "Thesis", body: ["长期逻辑稳定，主要变量是估值和新品周期。服务收入仍是支撑估值的关键。"] },
+          risks: { title: "关键风险", kicker: "Risks", body: ["短期最大风险是估值偏高导致安全边际不足。"] },
+          evidence: { title: "证据依据", kicker: "Evidence", body: ["证据主要来自财报结构、现金流、回购和市场预期变化。"] },
+          audit: { title: "反偏见审计", kicker: "Audit", body: ["需要避免品牌偏好导致的过度乐观。"] }
+        }
+      },
+      {
+        ticker: "NVDA",
+        name: "NVIDIA",
+        note: "高波动重点跟踪",
+        rating: "WAIT",
+        label: "等待",
+        tone: "blue",
+        decision: "等待回调",
+        summary: "模型认为产业趋势仍强，但风险收益比不够舒服。更适合等待波动释放，而不是在拥挤交易中追高。",
+        target: "167.00",
+        horizon: "30 个交易日",
+        infoGrade: "B+",
+        confidence: "74%",
+        lastRun: "今天 08:05",
+        asOf: "行情更新 11 分钟前",
+        price: "154.62",
+        change: "-0.36%",
+        quote: [["今开", "155.10"], ["52周高", "164.42"], ["PE", "46.8"], ["成交额", "高"]],
+        spark: [149, 152, 155, 158, 156, 160, 157, 155, 153, 154.62],
+        changes: [
+          ["blue", "评级从 BUY 降到 WAIT，原因是估值扩张快于证据增量。"],
+          ["amber", "核心逻辑未变，但短线拥挤度偏高。"],
+          ["red", "若大盘风险偏好下降，回撤可能被放大。"]
+        ],
+        actions: [
+          ["blue", "等待价格靠近 145 后再重新估算风险收益比。"],
+          ["amber", "跟踪数据中心收入预期是否继续上修。"],
+          ["red", "若连续两日放量下跌，优先阅读风险章节。"]
+        ],
+        run: {
+          active: false,
+          percent: 100,
+          status: "最近报告已完成",
+          stages: [
+            ["done", "Market", "行情完成"],
+            ["done", "News", "新闻完成"],
+            ["done", "Debate", "多空辩论"],
+            ["done", "Audit", "证据审计"],
+            ["done", "Decision", "最终决策"]
+          ],
+          events: [
+            ["green", "报告完成，等待下一次触发。"],
+            ["amber", "建议重点关注估值和拥挤度变化。"]
+          ]
+        },
+        sections: {
+          summary: {
+            title: "执行摘要",
+            kicker: "Summary",
+            body: [
+              "等待不是看空，而是承认当前价格对好消息的反映已经较多。工作台第一屏要把这种“结论积极但动作克制”的状态说清楚。",
+              "后续若回调或预期继续上修，才值得重新打开深度分析。"
+            ],
+            table: [["评级", "WAIT / 等待"], ["重新评估价位", "145 附近"], ["主要风险", "高估值和交易拥挤"]]
+          },
+          thesis: { title: "投资逻辑", kicker: "Thesis", body: ["产业趋势仍然强，但价格已经提前反映一部分预期。"] },
+          risks: { title: "关键风险", kicker: "Risks", body: ["估值敏感度高，任何需求预期扰动都可能放大波动。"] },
+          evidence: { title: "证据依据", kicker: "Evidence", body: ["重点证据来自收入预期、市场份额和供应链数据。"] },
+          audit: { title: "反偏见审计", kicker: "Audit", body: ["需要避免把长期产业确定性直接等同于短期买点确定性。"] }
+        }
+      }
+    ];
+
+    const sectionLabels = [
+      ["summary", "执行摘要"],
+      ["thesis", "投资逻辑"],
+      ["risks", "关键风险"],
+      ["evidence", "证据依据"],
+      ["audit", "反偏见审计"]
+    ];
+
+    let selectedIndex = 0;
+    let selectedSection = "summary";
+
+    const $ = (id) => document.getElementById(id);
+
+    function dotClass(tone) {
+      return `dot ${tone || ""}`.trim();
+    }
+
+    function badgeClass(tone) {
+      return `badge ${tone || "neutral"}`.trim();
+    }
+
+    function renderWatchlist() {
+      $("watchlist").innerHTML = stocks.map((stock, index) => {
+        const running = stock.run.active
+          ? `<div class="watch-foot"><div class="run-track"><span class="run-fill" style="width:${stock.run.percent}%"></span></div><span>${stock.run.percent}%</span></div>`
+          : `<div class="watch-foot"><span>${stock.lastRun}</span><span>${index + 2} 个历史版本</span></div>`;
+        return `
+          <button class="watch-item ${index === selectedIndex ? "active" : ""}" type="button" data-index="${index}">
+            <div class="watch-top">
+              <strong>${stock.ticker}</strong>
+              <span>${stock.name}</span>
+              <span class="${badgeClass(stock.tone)}">${stock.rating}</span>
+            </div>
+            <div class="watch-meta">${stock.note}</div>
+            ${running}
+          </button>
+        `;
+      }).join("");
+
+      document.querySelectorAll(".watch-item").forEach((button) => {
+        button.addEventListener("click", () => {
+          selectedIndex = Number(button.dataset.index);
+          selectedSection = "summary";
+          document.body.classList.remove("sidebar-open");
+          render();
+        });
+      });
+    }
+
+    function renderDecision(stock) {
+      $("instrumentTitle").textContent = `${stock.ticker} · ${stock.name}`;
+      $("instrumentMeta").textContent = `${stock.note} · ${stock.asOf} · 最新报告 ${stock.lastRun}`;
+      $("decisionBadge").className = badgeClass(stock.tone);
+      $("decisionBadge").textContent = stock.decision;
+      $("decisionRating").textContent = stock.rating;
+      $("decisionLabel").textContent = stock.label;
+      $("decisionCopy").textContent = stock.summary;
+      $("targetPrice").textContent = stock.target;
+      $("horizon").textContent = stock.horizon;
+      $("infoGrade").textContent = stock.infoGrade;
+      $("confidence").textContent = stock.confidence;
+      $("lastRun").textContent = stock.lastRun;
+
+      $("changeList").innerHTML = stock.changes.map(([tone, text]) =>
+        `<li><span class="${dotClass(tone)}"></span><span>${text}</span></li>`
+      ).join("");
+
+      $("actionList").innerHTML = stock.actions.map(([tone, text]) =>
+        `<li><span class="${dotClass(tone)}"></span><span>${text}</span></li>`
+      ).join("");
+    }
+
+    function renderMarket(stock) {
+      $("marketAsOf").textContent = stock.asOf;
+      $("lastPrice").textContent = stock.price;
+      $("priceChange").textContent = stock.change;
+      $("priceChange").style.color = stock.change.startsWith("-") ? "var(--red)" : "var(--green)";
+      $("quoteStrip").innerHTML = stock.quote.map(([label, value]) =>
+        `<div class="quote-cell"><span>${label}</span><strong>${value}</strong></div>`
+      ).join("");
+      drawSparkline(stock.spark, stock.change.startsWith("-") ? "#e76f61" : "#6abd79");
+    }
+
+    function drawSparkline(values, color) {
+      const canvas = $("sparkline");
+      const rect = canvas.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+      canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      const width = rect.width;
+      const height = rect.height;
+      ctx.clearRect(0, 0, width, height);
+
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const spread = Math.max(.01, max - min);
+      const x = (index) => 8 + index * ((width - 16) / Math.max(1, values.length - 1));
+      const y = (value) => height - 12 - ((value - min) / spread) * (height - 24);
+
+      ctx.strokeStyle = "rgba(255,255,255,.08)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 4; i += 1) {
+        const gy = 14 + i * ((height - 28) / 3);
+        ctx.beginPath();
+        ctx.moveTo(8, gy);
+        ctx.lineTo(width - 8, gy);
+        ctx.stroke();
+      }
+
+      const gradient = ctx.createLinearGradient(0, 0, 0, height);
+      gradient.addColorStop(0, `${color}55`);
+      gradient.addColorStop(1, `${color}00`);
+
+      ctx.beginPath();
+      values.forEach((value, index) => {
+        const px = x(index);
+        const py = y(value);
+        if (index === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.lineTo(x(values.length - 1), height - 10);
+      ctx.lineTo(x(0), height - 10);
+      ctx.closePath();
+      ctx.fillStyle = gradient;
+      ctx.fill();
+
+      ctx.beginPath();
+      values.forEach((value, index) => {
+        const px = x(index);
+        const py = y(value);
+        if (index === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.stroke();
+    }
+
+    function renderProgress(stock) {
+      $("runStatus").textContent = stock.run.status;
+      $("stageLine").innerHTML = stock.run.stages.map(([state, code, label]) =>
+        `<div class="stage ${state}"><span>${code}</span><strong>${label}</strong></div>`
+      ).join("");
+      $("eventList").innerHTML = stock.run.events.map(([tone, text]) =>
+        `<li><span class="${dotClass(tone)}"></span><span>${text}</span></li>`
+      ).join("");
+      $("progressText").textContent = `${stock.run.percent}%`;
+      $("progressFill").style.width = `${stock.run.percent}%`;
+    }
+
+    function renderReader(stock) {
+      $("readerNav").innerHTML = `<h2>研究目录</h2>${sectionLabels.map(([key, label]) =>
+        `<button class="section-btn ${key === selectedSection ? "active" : ""}" type="button" data-section="${key}">
+          <span>${label}</span><span>${key === selectedSection ? "当前" : ""}</span>
+        </button>`
+      ).join("")}`;
+
+      document.querySelectorAll(".section-btn").forEach((button) => {
+        button.addEventListener("click", () => {
+          selectedSection = button.dataset.section;
+          renderReader(stocks[selectedIndex]);
+          if (window.lucide) window.lucide.createIcons();
+        });
+      });
+
+      const section = stock.sections[selectedSection];
+      $("readerKicker").textContent = section.kicker;
+      const table = section.table
+        ? `<table><thead><tr><th>字段</th><th>当前值</th></tr></thead><tbody>${section.table.map(([label, value]) => `<tr><td>${label}</td><td>${value}</td></tr>`).join("")}</tbody></table>`
+        : "";
+      $("readerContent").innerHTML = `
+        <h3>${section.title}</h3>
+        ${section.body.map((paragraph) => `<p>${paragraph}</p>`).join("")}
+        ${table}
+      `;
+    }
+
+    function render() {
+      const stock = stocks[selectedIndex];
+      renderWatchlist();
+      renderDecision(stock);
+      renderMarket(stock);
+      renderProgress(stock);
+      renderReader(stock);
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    $("mobileMenu").addEventListener("click", () => document.body.classList.add("sidebar-open"));
+    $("mobileBackdrop").addEventListener("click", () => document.body.classList.remove("sidebar-open"));
+    window.addEventListener("resize", () => drawSparkline(stocks[selectedIndex].spark, stocks[selectedIndex].change.startsWith("-") ? "#e76f61" : "#6abd79"));
+
+    render();
+  </script>
+</body>
+</html>

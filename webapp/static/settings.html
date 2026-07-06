@@ -4,114 +4,330 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>FxxKStock 设置</title>
+  <link rel="icon" type="image/png" sizes="64x64" href="/static/favicon.png" />
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <script>
+    (() => {
+      const stored = localStorage.getItem("fxxkstock.theme");
+      const system = window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.dataset.theme = stored || system;
+    })();
+  </script>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #071019; --surface: #0b1622; --surface-2: #101e2c;
-      --line: #243548; --text: #e8eef5; --muted: #91a3b7;
-      --blue: #347ff0; --green: #36c879; --red: #ef6262; --amber: #e8b14f;
+      --bg: #0c1018;
+      --shell: #111722;
+      --panel: rgba(25, 34, 45, .9);
+      --panel-2: rgba(32, 42, 55, .9);
+      --line: rgba(151, 164, 184, .24);
+      --line-soft: rgba(151, 164, 184, .14);
+      --text: #eef4f8;
+      --text-soft: #cbd7df;
+      --muted: #94a4b0;
+      --faint: #6f7d89;
+      --accent: #4fb7c6;
+      --accent-strong: #8c7cf0;
+      --accent-soft: rgba(79, 183, 198, .17);
+      --blue: #6ea0f6;
+      --blue-soft: rgba(110, 160, 246, .16);
+      --amber: #d9aa55;
+      --amber-soft: rgba(217, 170, 85, .17);
+      --violet: #b08cf4;
+      --violet-soft: rgba(176, 140, 244, .17);
+      --app-gradient:
+        linear-gradient(135deg, rgba(79, 183, 198, .16), transparent 34%),
+        linear-gradient(225deg, rgba(176, 140, 244, .13), transparent 38%),
+        linear-gradient(180deg, #101621 0%, #080b10 100%);
+      --panel-gradient:
+        linear-gradient(145deg, rgba(79, 183, 198, .1), transparent 42%),
+        rgba(25, 34, 45, .9);
+      --topbar-bg: rgba(14, 19, 28, .86);
+      --input-bg: rgba(15, 21, 31, .88);
+      --subtle-fill: rgba(255, 255, 255, .035);
+      --shadow: 0 18px 50px rgba(0, 0, 0, .28);
+      --radius: 8px;
     }
+
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f4f7fb;
+      --shell: #ffffff;
+      --panel: rgba(255, 255, 255, .84);
+      --panel-2: rgba(244, 247, 252, .9);
+      --line: rgba(71, 86, 104, .2);
+      --line-soft: rgba(71, 86, 104, .12);
+      --text: #152232;
+      --text-soft: #33465b;
+      --muted: #64758a;
+      --faint: #8492a4;
+      --accent: #287f97;
+      --accent-strong: #6b5fd6;
+      --accent-soft: rgba(40, 127, 151, .12);
+      --blue: #336ebd;
+      --blue-soft: rgba(51, 110, 189, .12);
+      --amber: #9f7225;
+      --amber-soft: rgba(159, 114, 37, .13);
+      --violet: #7253c7;
+      --violet-soft: rgba(114, 83, 199, .13);
+      --app-gradient:
+        linear-gradient(135deg, rgba(73, 160, 184, .22), transparent 36%),
+        linear-gradient(225deg, rgba(130, 106, 218, .18), transparent 42%),
+        linear-gradient(180deg, #fbfcff 0%, #edf3fa 100%);
+      --panel-gradient:
+        linear-gradient(145deg, rgba(73, 160, 184, .12), transparent 42%),
+        rgba(255, 255, 255, .86);
+      --topbar-bg: rgba(255, 255, 255, .78);
+      --input-bg: rgba(255, 255, 255, .72);
+      --subtle-fill: rgba(20, 32, 45, .035);
+      --shadow: 0 18px 48px rgba(46, 61, 82, .12);
+    }
+
     * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font: 13px/1.45 Inter, ui-sans-serif, system-ui, sans-serif; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--app-gradient);
+      color: var(--text);
+      font: 13px/1.45 Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      letter-spacing: 0;
+    }
     button, input, select { font: inherit; color: inherit; letter-spacing: 0; }
     button { cursor: pointer; }
-    .icon { width: 16px; height: 16px; stroke-width: 1.8; }
+    .icon { width: 16px; height: 16px; flex: 0 0 auto; stroke-width: 1.8; }
+
     .topbar {
-      position: sticky; top: 0; z-index: 10; height: 58px; padding: 0 22px;
-      display: flex; align-items: center; border-bottom: 1px solid var(--line); background: #09131e;
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      min-height: 64px;
+      padding: 0 22px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--topbar-bg);
+      backdrop-filter: blur(18px);
     }
-    .brand { font-size: 16px; font-weight: 750; }
-    .brand span { margin-left: 10px; color: var(--muted); font-size: 12px; font-weight: 500; }
-    .back {
-      margin-left: auto; height: 34px; padding: 0 12px; display: inline-flex; align-items: center; gap: 7px;
-      border: 1px solid var(--line); border-radius: 4px; background: transparent; text-decoration: none; color: var(--text);
+    .brand {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-right: auto;
+      font-size: 17px;
+      font-weight: 760;
     }
-    .layout { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 190px minmax(0, 1fr); }
-    .nav { position: sticky; top: 58px; align-self: start; padding: 24px 16px; }
+    .brand img { width: 24px; height: 24px; border-radius: 6px; }
+    .brand span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .btn, .icon-btn, .back {
+      height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--text-soft);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .btn { padding: 0 12px; }
+    .icon-btn { width: 36px; padding: 0; }
+    .btn.primary {
+      border-color: transparent;
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      color: #fff;
+      font-weight: 760;
+    }
+    .btn.danger { color: var(--violet); background: var(--violet-soft); }
+    .btn:disabled, .icon-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+    .layout {
+      max-width: 1180px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 210px minmax(0, 1fr);
+    }
+    .nav {
+      position: sticky;
+      top: 64px;
+      align-self: start;
+      padding: 24px 16px;
+    }
     .nav a {
-      height: 36px; padding: 0 10px; display: flex; align-items: center; gap: 9px;
-      color: var(--muted); text-decoration: none; border-left: 2px solid transparent;
+      min-height: 38px;
+      padding: 0 10px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      color: var(--muted);
+      text-decoration: none;
     }
-    .nav a:hover { color: var(--text); background: #0b1723; }
-    .content { min-width: 0; border-left: 1px solid var(--line); }
-    .section { padding: 26px 28px 30px; border-bottom: 1px solid var(--line); scroll-margin-top: 58px; }
-    .section-head { display: flex; align-items: start; gap: 12px; margin-bottom: 20px; }
-    .section-head h2 { margin: 0; font-size: 17px; }
-    .section-head p { margin: 4px 0 0; color: var(--muted); }
-    .status-line { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); white-space: nowrap; }
+    .nav a:hover {
+      color: var(--text);
+      border-color: var(--line-soft);
+      background: var(--subtle-fill);
+    }
+    .content {
+      min-width: 0;
+      border-left: 1px solid var(--line);
+    }
+    .section {
+      padding: 26px 28px 30px;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 76px;
+    }
+    .section-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel-gradient);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+      padding: 20px;
+    }
+    .section-head {
+      display: flex;
+      align-items: start;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .section-head h2 { margin: 0; font-size: 18px; }
+    .section-head p { margin: 5px 0 0; color: var(--muted); }
+    .status-line {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-    .dot.ready { background: var(--green); }
-    .dot.failed { background: var(--red); }
+    .dot.ready { background: var(--accent); }
+    .dot.failed { background: var(--violet); }
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
     .field { min-width: 0; }
     .field.full { grid-column: 1 / -1; }
-    .field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11px; }
+    .field label {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 720;
+    }
     input, select {
-      width: 100%; height: 38px; padding: 0 10px; border: 1px solid var(--line);
-      border-radius: 4px; outline: 0; background: #08121c;
+      width: 100%;
+      height: 38px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      outline: 0;
+      background: var(--input-bg);
     }
-    input:focus, select:focus { border-color: var(--blue); }
+    input:focus, select:focus { border-color: var(--accent); }
     input:disabled { opacity: .55; }
-    .toggle-row { min-height: 38px; display: flex; align-items: center; gap: 18px; }
+    .toggle-row { min-height: 38px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
     .toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
-    .toggle input { width: 15px; height: 15px; accent-color: var(--blue); }
+    .toggle input { width: 15px; height: 15px; accent-color: var(--accent); }
     .actions { margin-top: 18px; display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
-    .btn {
-      height: 36px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-      border: 1px solid var(--line); border-radius: 4px; background: #101d2a;
-    }
-    .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
-    .btn.danger { color: #ff8a8a; }
-    .btn:disabled { opacity: .45; cursor: not-allowed; }
     .site-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-    .profile-note { margin-top: 12px; color: var(--muted); font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
-    .api-list { border-top: 1px solid var(--line); }
+    .profile-note {
+      margin-top: 12px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+    .api-list { display: grid; gap: 10px; }
     .api-row {
-      min-height: 58px; padding: 10px 0; display: grid;
-      grid-template-columns: 210px minmax(220px, 1fr) auto; align-items: center; gap: 12px;
-      border-bottom: 1px solid var(--line);
+      min-height: 64px;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 220px minmax(220px, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: var(--subtle-fill);
     }
     .api-name strong { display: block; font-size: 12px; }
     .api-name span { color: var(--muted); font-size: 10px; }
     .secret-wrap { position: relative; }
     .secret-wrap input { padding-right: 38px; }
     .reveal {
-      position: absolute; right: 2px; top: 2px; width: 34px; height: 34px;
-      display: grid; place-items: center; border: 0; background: transparent; color: var(--muted);
+      position: absolute;
+      right: 2px;
+      top: 2px;
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
     }
     .api-actions { display: flex; gap: 7px; }
-    .configured { color: var(--green); }
+    .configured { color: var(--accent); }
     .unset { color: var(--muted); }
     .toast {
-      position: fixed; right: 20px; bottom: 20px; z-index: 30; max-width: min(420px, calc(100vw - 40px));
-      padding: 11px 14px; border: 1px solid var(--line); border-radius: 5px; background: #142333;
-      opacity: 0; transform: translateY(8px); pointer-events: none; transition: .2s;
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      z-index: 30;
+      max-width: min(420px, calc(100vw - 40px));
+      padding: 11px 14px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: .2s;
     }
     .toast.show { opacity: 1; transform: none; }
-    .toast.error { border-color: #723b44; color: #ffb2b2; }
+    .toast.error { border-color: var(--violet); color: var(--violet); }
+
     @media (max-width: 760px) {
-      .topbar { padding: 0 14px; }
+      .topbar { padding: 10px 14px; flex-wrap: wrap; }
+      .brand { width: calc(100% - 96px); }
       .brand span { display: none; }
       .layout { display: block; }
-      .nav { position: static; padding: 10px 12px; display: flex; overflow-x: auto; border-bottom: 1px solid var(--line); }
-      .nav a { flex: 0 0 auto; border-left: 0; border-bottom: 2px solid transparent; }
+      .nav {
+        position: static;
+        padding: 10px 12px;
+        display: flex;
+        overflow-x: auto;
+        border-bottom: 1px solid var(--line);
+      }
+      .nav a { flex: 0 0 auto; }
       .content { border-left: 0; }
-      .section { padding: 22px 15px 26px; }
+      .section { padding: 14px 12px 18px; }
+      .section-card { padding: 15px; }
       .grid { grid-template-columns: 1fr; }
       .field.full { grid-column: auto; }
       .section-head { flex-wrap: wrap; }
       .status-line { width: 100%; margin-left: 0; }
-      .api-row { grid-template-columns: 1fr; gap: 7px; }
+      .api-row { grid-template-columns: 1fr; gap: 8px; }
       .api-actions { justify-content: flex-end; }
     }
   </style>
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">FxxKStock <span>本地设置中心</span></div>
+    <div class="brand"><img src="/static/fxxkstock-icon.png" alt="" />FxxKStock <span>本地设置中心</span></div>
+    <button class="icon-btn" id="themeToggle" type="button" aria-label="切换昼夜主题"><i data-lucide="moon" class="icon"></i></button>
     <a class="back" href="/"><i data-lucide="arrow-left" class="icon"></i>返回分析</a>
   </header>
+
   <div class="layout">
     <nav class="nav">
       <a href="#browser"><i data-lucide="chrome" class="icon"></i>Chrome</a>
@@ -119,74 +335,94 @@
       <a href="#analysis"><i data-lucide="brain-circuit" class="icon"></i>分析默认值</a>
       <a href="#data"><i data-lucide="database" class="icon"></i>数据参数</a>
     </nav>
+
     <main class="content">
       <section class="section" id="browser">
-        <div class="section-head">
-          <div><h2>Chrome 登录环境</h2><p>使用项目专用 Profile 保存网站登录状态。</p></div>
-          <div class="status-line"><span class="dot" id="browserDot"></span><span id="browserStatus">正在检查</span></div>
-        </div>
-        <div class="grid">
-          <div class="field"><label>操作系统</label><select id="browserPlatform"><option value="macos">macOS</option><option value="windows">Windows</option><option value="ubuntu">Ubuntu</option></select></div>
-          <div class="field"><label>启动等待秒数</label><input id="browserTimeout" type="number" min="1" max="120" /></div>
-          <div class="field full"><label>Chrome 可执行文件（留空自动检测）</label><input id="browserExecutable" /></div>
-          <div class="field full"><label>Profile 保存目录</label><input id="browserProfile" /></div>
-          <div class="field full"><label>自动化行为</label><div class="toggle-row">
-            <label class="toggle"><input id="browserAutoStart" type="checkbox" />分析前自动启动</label>
-            <label class="toggle"><input id="browserAutoClose" type="checkbox" />分析后自动关闭</label>
-          </div></div>
-        </div>
-        <div class="actions">
-          <button class="btn primary" id="startBrowser"><i data-lucide="play" class="icon"></i>启动 Chrome</button>
-          <button class="btn danger" id="closeBrowser"><i data-lucide="square" class="icon"></i>关闭并保存</button>
-          <div class="site-actions">
-            <button class="btn login-site" data-site="nga">NGA</button>
-            <button class="btn login-site" data-site="xueqiu">雪球</button>
-            <button class="btn login-site" data-site="eastmoney">东方财富</button>
-            <button class="btn login-site" data-site="ths">同花顺</button>
-            <button class="btn login-site" data-site="cninfo">巨潮资讯</button>
+        <div class="section-card">
+          <div class="section-head">
+            <div><h2>Chrome 登录环境</h2><p>使用项目专用 Profile 保存网站登录状态。</p></div>
+            <div class="status-line"><span class="dot" id="browserDot"></span><span id="browserStatus">正在检查</span></div>
           </div>
+          <div class="grid">
+            <div class="field"><label>操作系统</label><select id="browserPlatform"><option value="macos">macOS</option><option value="windows">Windows</option><option value="ubuntu">Ubuntu</option></select></div>
+            <div class="field"><label>启动等待秒数</label><input id="browserTimeout" type="number" min="1" max="120" /></div>
+            <div class="field full"><label>Chrome 可执行文件，留空则自动检测</label><input id="browserExecutable" /></div>
+            <div class="field full"><label>Profile 保存目录</label><input id="browserProfile" /></div>
+            <div class="field full"><label>自动化行为</label><div class="toggle-row">
+              <label class="toggle"><input id="browserAutoStart" type="checkbox" />分析前自动启动</label>
+              <label class="toggle"><input id="browserAutoClose" type="checkbox" />分析后自动关闭</label>
+            </div></div>
+          </div>
+          <div class="actions">
+            <button class="btn primary" id="startBrowser"><i data-lucide="play" class="icon"></i>启动 Chrome</button>
+            <button class="btn danger" id="closeBrowser"><i data-lucide="square" class="icon"></i>关闭并保存</button>
+            <div class="site-actions">
+              <button class="btn login-site" data-site="nga">NGA</button>
+              <button class="btn login-site" data-site="xueqiu">雪球</button>
+              <button class="btn login-site" data-site="eastmoney">东方财富</button>
+              <button class="btn login-site" data-site="ths">同花顺</button>
+              <button class="btn login-site" data-site="cninfo">巨潮资讯</button>
+            </div>
+          </div>
+          <div class="profile-note" id="profileStatus"></div>
         </div>
-        <div class="profile-note" id="profileStatus"></div>
       </section>
 
       <section class="section" id="keys">
-        <div class="section-head"><div><h2>API Keys</h2><p>密钥写入项目 .env；页面不会读取或回显已保存内容。</p></div></div>
-        <div class="api-list" id="apiKeys"></div>
+        <div class="section-card">
+          <div class="section-head"><div><h2>API Keys</h2><p>密钥写入项目 `.env`；页面不会读取或回显已保存内容。</p></div></div>
+          <div class="api-list" id="apiKeys"></div>
+        </div>
       </section>
 
       <section class="section" id="analysis">
-        <div class="section-head"><div><h2>分析默认值</h2><p>新建分析时自动带入，仍可在单次运行中修改。</p></div></div>
-        <div class="grid">
-          <div class="field"><label>模型供应商</label><select id="provider"></select></div>
-          <div class="field"><label>输出语言</label><select id="outputLanguage"><option>Chinese</option><option>English</option><option>Japanese</option><option>Korean</option></select></div>
-          <div class="field full"><label>快速模型</label><select id="quickModel"></select></div>
-          <div class="field full"><label>深度模型</label><select id="deepModel"></select></div>
-          <div class="field"><label>研究深度</label><select id="researchDepth"><option value="simple">简单</option><option value="medium">中等</option><option value="complex">复杂</option></select></div>
-          <div class="field"><label>记忆模式</label><select id="analysisMode"><option value="auto">自动增量</option><option value="full">完整刷新</option></select></div>
-          <div class="field full"><label>自定义后端地址（可留空）</label><input id="backendUrl" placeholder="https://api.example.com/v1" /></div>
+        <div class="section-card">
+          <div class="section-head"><div><h2>分析默认值</h2><p>新建分析时自动带入，仍可在单次运行中修改。</p></div></div>
+          <div class="grid">
+            <div class="field"><label>模型供应商</label><select id="provider"></select></div>
+            <div class="field"><label>输出语言</label><select id="outputLanguage"><option>Chinese</option><option>English</option><option>Japanese</option><option>Korean</option></select></div>
+            <div class="field full"><label>快速模型</label><select id="quickModel"></select></div>
+            <div class="field full"><label>深度模型</label><select id="deepModel"></select></div>
+            <div class="field"><label>研究深度</label><select id="researchDepth"><option value="simple">简单</option><option value="medium">中等</option><option value="complex">复杂</option></select></div>
+            <div class="field"><label>记忆模式</label><select id="analysisMode"><option value="auto">自动增量</option><option value="full">完整刷新</option></select></div>
+            <div class="field full"><label>自定义后端地址，可留空</label><input id="backendUrl" placeholder="https://api.example.com/v1" /></div>
+          </div>
         </div>
       </section>
 
       <section class="section" id="data">
-        <div class="section-head"><div><h2>数据参数</h2><p>控制每次分析的数据量和长期记忆刷新周期。</p></div></div>
-        <div class="grid">
-          <div class="field"><label>单标的新闻上限</label><input id="newsLimit" type="number" min="1" max="100" /></div>
-          <div class="field"><label>宏观新闻上限</label><input id="globalNewsLimit" type="number" min="1" max="100" /></div>
-          <div class="field"><label>社区帖子上限</label><input id="gubaLimit" type="number" min="1" max="100" /></div>
-          <div class="field"><label>基本面记忆有效期（天）</label><input id="fundamentalsTtl" type="number" min="0" max="3650" /></div>
+        <div class="section-card">
+          <div class="section-head"><div><h2>数据参数</h2><p>控制每次分析的数据量和长期记忆刷新周期。</p></div></div>
+          <div class="grid">
+            <div class="field"><label>单标的新闻上限</label><input id="newsLimit" type="number" min="1" max="100" /></div>
+            <div class="field"><label>宏观新闻上限</label><input id="globalNewsLimit" type="number" min="1" max="100" /></div>
+            <div class="field"><label>社区帖子上限</label><input id="gubaLimit" type="number" min="1" max="100" /></div>
+            <div class="field"><label>基本面记忆有效期，天</label><input id="fundamentalsTtl" type="number" min="0" max="3650" /></div>
+          </div>
+          <div class="actions"><button class="btn primary" id="saveGeneral"><i data-lucide="save" class="icon"></i>保存全部设置</button></div>
         </div>
-        <div class="actions"><button class="btn primary" id="saveGeneral"><i data-lucide="save" class="icon"></i>保存全部设置</button></div>
       </section>
     </main>
   </div>
+
   <div class="toast" id="toast"></div>
+
   <script>
     const $ = (id) => document.getElementById(id);
     let general = {};
     let modelCatalog = {};
     let browserState = {};
     let toastTimer;
+
     function icons() { if (window.lucide) lucide.createIcons(); }
+    function currentTheme() { return document.documentElement.dataset.theme === "light" ? "light" : "dark"; }
+    function applyTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      localStorage.setItem("fxxkstock.theme", theme);
+      $("themeToggle").innerHTML = `<i data-lucide="${theme === "light" ? "sun" : "moon"}" class="icon"></i>`;
+      icons();
+    }
+    function toggleTheme() { applyTheme(currentTheme() === "light" ? "dark" : "light"); }
     function toast(message, error = false) {
       clearTimeout(toastTimer);
       $("toast").textContent = message;
@@ -195,7 +431,8 @@
     }
     async function api(url, options = {}) {
       const response = await fetch(url, { headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options });
-      let data = {}; try { data = await response.json(); } catch {}
+      let data = {};
+      try { data = await response.json(); } catch {}
       if (!response.ok) throw new Error(data.detail || `请求失败 (${response.status})`);
       return data;
     }
@@ -235,26 +472,30 @@
       $("apiKeys").innerHTML = keys.map((item) => `
         <div class="api-row" data-key="${item.key}">
           <div class="api-name"><strong>${item.key}</strong><span class="${item.configured ? "configured" : "unset"}">${item.configured ? "已配置" : "未配置"} · ${item.providers.join(", ")}</span></div>
-          <div class="secret-wrap"><input type="password" autocomplete="new-password" placeholder="${item.configured ? "输入新值以覆盖" : "输入 API Key"}" /><button class="reveal" title="显示或隐藏"><i data-lucide="eye" class="icon"></i></button></div>
-          <div class="api-actions"><button class="btn save-key" title="保存"><i data-lucide="save" class="icon"></i></button><button class="btn danger delete-key" title="删除" ${item.configured ? "" : "disabled"}><i data-lucide="trash-2" class="icon"></i></button></div>
+          <div class="secret-wrap"><input type="password" autocomplete="new-password" placeholder="${item.configured ? "输入新值以覆盖" : "输入 API Key"}" /><button class="reveal" type="button" title="显示或隐藏"><i data-lucide="eye" class="icon"></i></button></div>
+          <div class="api-actions"><button class="btn save-key" type="button" title="保存"><i data-lucide="save" class="icon"></i></button><button class="btn danger delete-key" type="button" title="删除" ${item.configured ? "" : "disabled"}><i data-lucide="trash-2" class="icon"></i></button></div>
         </div>`).join("");
       document.querySelectorAll(".reveal").forEach((button) => button.addEventListener("click", () => {
         const input = button.parentElement.querySelector("input");
         input.type = input.type === "password" ? "text" : "password";
       }));
       document.querySelectorAll(".save-key").forEach((button) => button.addEventListener("click", async () => {
-        const row = button.closest(".api-row"); const input = row.querySelector("input");
+        const row = button.closest(".api-row");
+        const input = row.querySelector("input");
         if (!input.value.trim()) return toast("请输入 API Key", true);
         try {
           await api(`/api/settings/api-keys/${row.dataset.key}`, { method: "PUT", body: JSON.stringify({ value: input.value }) });
-          input.value = ""; await loadSettings(); toast(`${row.dataset.key} 已保存`);
+          input.value = "";
+          await loadSettings();
+          toast(`${row.dataset.key} 已保存`);
         } catch (error) { toast(error.message, true); }
       }));
       document.querySelectorAll(".delete-key").forEach((button) => button.addEventListener("click", async () => {
         const row = button.closest(".api-row");
         try {
           await api(`/api/settings/api-keys/${row.dataset.key}`, { method: "DELETE" });
-          await loadSettings(); toast(`${row.dataset.key} 已删除`);
+          await loadSettings();
+          toast(`${row.dataset.key} 已删除`);
         } catch (error) { toast(error.message, true); }
       }));
       icons();
@@ -295,7 +536,11 @@
     async function saveGeneral() {
       try {
         const data = await api("/api/settings/general", { method: "PUT", body: JSON.stringify(collectGeneral()) });
-        general = data.general; applyGeneral(); await refreshBrowser(); toast("设置已保存"); return true;
+        general = data.general;
+        applyGeneral();
+        await refreshBrowser();
+        toast("设置已保存");
+        return true;
       } catch (error) { toast(error.message, true); return false; }
     }
     function paintBrowser() {
@@ -312,28 +557,38 @@
       try { browserState = await api("/api/browser/status"); paintBrowser(); }
       catch (error) { $("browserDot").className = "dot failed"; $("browserStatus").textContent = error.message; }
     }
+
+    $("themeToggle").addEventListener("click", toggleTheme);
     $("provider").addEventListener("change", () => { general.quick_think_llm = ""; general.deep_think_llm = ""; refreshModels(); });
     $("saveGeneral").addEventListener("click", saveGeneral);
     $("startBrowser").addEventListener("click", async () => {
       try {
         if (!(await saveGeneral())) return;
         browserState = await api("/api/browser/start", { method: "POST" });
-        paintBrowser(); toast("Chrome 已启动，请完成网站登录");
+        paintBrowser();
+        toast("Chrome 已启动，请完成网站登录");
       } catch (error) { toast(error.message, true); await refreshBrowser(); }
     });
     $("closeBrowser").addEventListener("click", async () => {
       try {
         browserState = await api("/api/browser/close", { method: "POST" });
-        paintBrowser(); toast("Chrome 已正常关闭，Profile 已保存");
+        paintBrowser();
+        toast("Chrome 已正常关闭，Profile 已保存");
       } catch (error) { toast(error.message, true); await refreshBrowser(); }
     });
     document.querySelectorAll(".login-site").forEach((button) => button.addEventListener("click", async () => {
-      try { await api(`/api/browser/open-login-site/${button.dataset.site}`, { method: "POST" }); toast("已在专用 Chrome 中打开"); }
-      catch (error) { toast(error.message, true); }
+      try {
+        await api(`/api/browser/open-login-site/${button.dataset.site}`, { method: "POST" });
+        toast("已在专用 Chrome 中打开");
+      } catch (error) { toast(error.message, true); }
     }));
     (async () => {
-      try { await loadSettings(); await loadModels(); await refreshBrowser(); }
-      catch (error) { toast(error.message, true); }
+      try {
+        applyTheme(currentTheme());
+        await loadSettings();
+        await loadModels();
+        await refreshBrowser();
+      } catch (error) { toast(error.message, true); }
       icons();
     })();
   </script>

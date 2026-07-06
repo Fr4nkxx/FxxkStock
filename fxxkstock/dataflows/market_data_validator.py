@@ -11,12 +11,14 @@ claim. Deterministic, no LLM involved.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import date
 import re
 from typing import Any
 
 import pandas as pd
 from stockstats import wrap
 
+from fxxkstock.dataflows.latest_quote import fetch_latest_market_quote
 from fxxkstock.dataflows.stockstats_utils import load_ohlcv
 from fxxkstock.dataflows.currency_utils import (
     format_fx_header_line,
@@ -31,6 +33,33 @@ DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
     "rsi", "boll", "boll_ub", "boll_lb",
     "macd", "macds", "macdh", "atr",
 )
+
+
+def _is_current_analysis_date(curr_date: str) -> bool:
+    try:
+        requested = date.fromisoformat(str(curr_date))
+    except ValueError:
+        return False
+    return requested >= date.today()
+
+
+def _latest_quote_for_current_date(symbol: str, curr_date: str) -> dict[str, Any] | None:
+    if not _is_current_analysis_date(curr_date):
+        return None
+    try:
+        return fetch_latest_market_quote(symbol)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _usable_latest_quote(quote: dict[str, Any] | None) -> bool:
+    if not isinstance(quote, dict):
+        return False
+    try:
+        price = float(quote.get("last_price"))
+    except (TypeError, ValueError):
+        return False
+    return pd.notna(price) and price > 0
 
 
 def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:
@@ -69,23 +98,61 @@ def build_current_market_snapshot_data(
             return None
         return round(float(value) * float(rate), 6)
 
-    return {
+    latest_complete_date = pd.Timestamp(latest["Date"]).strftime("%Y-%m-%d")
+    latest_complete_close = displayed("Close")
+    snapshot = {
         "ticker": symbol.upper(),
         "requested_date": str(curr_date),
-        "latest_trading_date": pd.Timestamp(latest["Date"]).strftime("%Y-%m-%d"),
+        "latest_trading_date": latest_complete_date,
+        "latest_complete_ohlcv_date": latest_complete_date,
+        "latest_complete_ohlcv_close": latest_complete_close,
+        "price_basis": "latest_complete_ohlcv",
         "currency": "CNY" if rate is not None else source_ccy,
         "source_currency": source_ccy,
         "fx_rate_to_cny": rate,
         "open": displayed("Open"),
         "high": displayed("High"),
         "low": displayed("Low"),
-        "close": displayed("Close"),
+        "close": latest_complete_close,
         "volume": (
             int(latest["Volume"])
             if latest.get("Volume") is not None and not pd.isna(latest.get("Volume"))
             else None
         ),
     }
+    latest_quote = _latest_quote_for_current_date(symbol, curr_date)
+    if _usable_latest_quote(latest_quote):
+        quote_currency = latest_quote.get("currency") or snapshot["currency"]
+        quote_rate = 1.0 if quote_currency == "CNY" else rate
+        if quote_rate is None:
+            return snapshot
+        latest_price = round(float(latest_quote["last_price"]) * float(quote_rate), 6)
+        snapshot.update(
+            {
+                "price_basis": "latest_quote",
+                "latest_trading_date": (
+                    str(latest_quote.get("as_of"))[:10]
+                    if latest_quote.get("as_of")
+                    else latest_complete_date
+                ),
+                "latest_quote_as_of": latest_quote.get("as_of"),
+                "latest_quote_source": latest_quote.get("source"),
+                "latest_quote_symbol": latest_quote.get("symbol"),
+                "latest_quote_currency": quote_currency,
+                "latest_price": latest_price,
+                "close": latest_price,
+            }
+        )
+        for source, target in (
+            ("open", "open"),
+            ("high", "high"),
+            ("low", "low"),
+            ("previous_close", "previous_close"),
+        ):
+            value = latest_quote.get(source)
+            if value is not None and pd.notna(value):
+                snapshot[target] = round(float(value) * float(quote_rate), 6)
+    return snapshot
 
 
 def render_current_market_context(snapshot: dict[str, Any]) -> str:
@@ -94,6 +161,25 @@ def render_current_market_context(snapshot: dict[str, Any]) -> str:
         return (
             "CURRENT MARKET SNAPSHOT UNAVAILABLE. Do not present any historical "
             f"price as current. Reason: {snapshot['error']}"
+        )
+    if snapshot.get("price_basis") == "latest_quote":
+        return (
+            "AUTHORITATIVE CURRENT MARKET SNAPSHOT (highest-priority facts for this run)\n"
+            f"- Ticker: {snapshot.get('ticker')}\n"
+            f"- Requested analysis date: {snapshot.get('requested_date')}\n"
+            f"- Current latest quote: {snapshot.get('close')} {snapshot.get('currency')}\n"
+            f"- Latest quote as of: {snapshot.get('latest_quote_as_of') or 'unknown'}\n"
+            f"- Latest quote source: {snapshot.get('latest_quote_source') or 'unknown'}\n"
+            f"- Latest complete OHLCV row for indicators: "
+            f"{snapshot.get('latest_complete_ohlcv_date')} close "
+            f"{snapshot.get('latest_complete_ohlcv_close')} {snapshot.get('currency')}\n"
+            f"- Current session quote OHLC when available: {snapshot.get('open')} / "
+            f"{snapshot.get('high')} / {snapshot.get('low')} / {snapshot.get('close')}\n"
+            "Hard rule: use the current latest quote for current-price, position, "
+            "entry/exit, and stop-distance decisions. Use the latest complete OHLCV "
+            "row for technical indicators unless a tool explicitly provides newer "
+            "indicator data. Historical numbers may only be cited with their original "
+            "date and must never be described as current."
         )
     return (
         "AUTHORITATIVE CURRENT MARKET SNAPSHOT (highest-priority facts for this run)\n"
@@ -197,6 +283,31 @@ def build_verified_market_snapshot(
         f"- Display currency: CNY",
         f"- {fx_line}",
         "- Rows after the requested analysis date are excluded before verification.",
+    ]
+    latest_quote = _latest_quote_for_current_date(symbol, curr_date)
+    if _usable_latest_quote(latest_quote):
+        quote_currency = latest_quote.get("currency") or source_ccy
+        quote_rate = 1.0 if quote_currency == "CNY" else fx_rate
+        if quote_rate is not None:
+            latest_price = round(
+                float(latest_quote["last_price"]) * float(quote_rate), 6
+            )
+            lines += [
+                "",
+                "### Current latest quote",
+                "",
+                "| Field | Value |",
+                "|---|---:|",
+                f"| Source | {latest_quote.get('source') or 'unknown'} |",
+                f"| As of | {latest_quote.get('as_of') or 'unknown'} |",
+                f"| Latest price | {_fmt(latest_price)} CNY |",
+                "",
+                "Use this latest quote as the current price for action, position, "
+                "entry/exit, and stop-distance decisions. The OHLCV row and indicators "
+                "below remain based on the latest complete trading row.",
+            ]
+
+    lines += [
         "",
         "### Latest verified OHLCV row (CNY display)",
         "",
