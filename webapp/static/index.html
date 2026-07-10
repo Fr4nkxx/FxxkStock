@@ -1053,8 +1053,7 @@
             <button class="position-btn" type="button" data-position-status="flat">空仓</button>
             <button class="position-btn" type="button" data-position-status="held">持有</button>
           </div></div>
-          <div class="field hidden" id="quantityField"><label>持股数量</label><input id="positionQuantity" type="number" min="0.000001" step="any" inputmode="decimal" /></div>
-          <div class="field hidden" id="averageCostField"><label>平均成本价</label><input id="positionAverageCost" type="number" min="0.000001" step="any" inputmode="decimal" /></div>
+          <div class="field hidden" id="averageCostField"><label>持仓成本价</label><input id="positionAverageCost" type="number" min="0.000001" step="any" inputmode="decimal" placeholder="按股票自动记住" /></div>
           <div class="field"><label>Chrome 平台</label><select id="chromePlatform"><option value="macos">macOS</option><option value="windows">Windows</option><option value="ubuntu">Ubuntu</option></select></div>
           <div class="field"><label>浏览器数据</label><label class="toggle"><input id="chromeAutoStart" type="checkbox" checked />自动启动 Chrome</label></div>
         </div>
@@ -1093,6 +1092,7 @@
     const ACTIVE_RUNS_KEY = "fxxkstock.activeRuns";
     const SELECTED_TICKER_KEY = "fxxkstock.selectedTicker";
     const WATCHLIST_KEY = "fxxkstock.watchlist.v1";
+    const POSITION_COSTS_KEY = "fxxkstock.positionCosts.v1";
     const STAGE_DEFS = [
       ["market", "Market", "行情"],
       ["fundamentals", "Fundamental", "基本面"],
@@ -1125,6 +1125,27 @@
     function readJson(key, fallback) {
       try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); }
       catch { return fallback; }
+    }
+    function positionCostTicker(ticker = $("ticker")?.value) {
+      return String(ticker || "").trim().toUpperCase();
+    }
+    function savePositionCost(ticker, value) {
+      const cost = Number(value);
+      const key = positionCostTicker(ticker);
+      if (!key || !(cost > 0)) return;
+      const costs = readJson(POSITION_COSTS_KEY, {});
+      costs[key] = cost;
+      localStorage.setItem(POSITION_COSTS_KEY, JSON.stringify(costs));
+    }
+    function applyPositionStatus(status) {
+      positionStatus = status;
+      document.querySelectorAll(".position-btn").forEach((item) => item.classList.toggle("active", item.dataset.positionStatus === status));
+      $("averageCostField").classList.toggle("hidden", status !== "held");
+    }
+    function restorePositionCost(ticker = $("ticker").value) {
+      const cost = Number(readJson(POSITION_COSTS_KEY, {})[positionCostTicker(ticker)]);
+      $("positionAverageCost").value = cost > 0 ? String(cost) : "";
+      applyPositionStatus(cost > 0 ? "held" : "unknown");
     }
     function icons() { if (window.lucide) lucide.createIcons(); }
     function escapeHtml(text) { const node = document.createElement("div"); node.textContent = text || ""; return node.innerHTML; }
@@ -1945,13 +1966,13 @@
       if (positionStatus === "flat") {
         position = { status: "flat" };
       } else if (positionStatus === "held") {
-        const quantity = Number($("positionQuantity").value);
         const averageCost = Number($("positionAverageCost").value);
-        if (!(quantity > 0) || !(averageCost > 0)) {
-          alert("持有状态需要填写大于 0 的持股数量和平均成本价。");
+        if (!(averageCost > 0)) {
+          alert("持有状态需要填写大于 0 的持仓成本价。");
           return;
         }
-        position = { status: "held", quantity, average_cost: averageCost };
+        savePositionCost(ticker, averageCost);
+        position = { status: "held", average_cost: averageCost };
       }
       closeModal("analysisModal");
       selectedTicker = ticker.toUpperCase();
@@ -2026,8 +2047,8 @@
     $("tradeDate").value = new Date().toISOString().slice(0, 10);
     const platform = (navigator.platform || "").toLowerCase();
     $("chromePlatform").value = platform.includes("mac") ? "macos" : platform.includes("win") ? "windows" : "ubuntu";
-    $("newAnalysisBtn").addEventListener("click", () => openModal("analysisModal"));
-    $("reanalyzeBtn").addEventListener("click", () => { if (selectedTicker) $("ticker").value = selectedTicker; openModal("analysisModal"); });
+    $("newAnalysisBtn").addEventListener("click", () => { restorePositionCost(); openModal("analysisModal"); });
+    $("reanalyzeBtn").addEventListener("click", () => { if (selectedTicker) $("ticker").value = selectedTicker; restorePositionCost(); openModal("analysisModal"); });
     $("pinTickerBtn").addEventListener("click", togglePinned);
     $("themeToggle").addEventListener("click", toggleTheme);
     $("settingsBtn").addEventListener("click", () => { window.location.href = "/settings"; });
@@ -2045,18 +2066,9 @@
       document.querySelectorAll(".mode-btn").forEach((item) => item.classList.remove("active"));
       button.classList.add("active"); selectedMode = button.dataset.mode;
     }));
-    document.querySelectorAll(".position-btn").forEach((button) => button.addEventListener("click", () => {
-      document.querySelectorAll(".position-btn").forEach((item) => item.classList.remove("active"));
-      button.classList.add("active");
-      positionStatus = button.dataset.positionStatus;
-      const showHeld = positionStatus === "held";
-      $("quantityField").classList.toggle("hidden", !showHeld);
-      $("averageCostField").classList.toggle("hidden", !showHeld);
-      if (!showHeld) {
-        $("positionQuantity").value = "";
-        $("positionAverageCost").value = "";
-      }
-    }));
+    document.querySelectorAll(".position-btn").forEach((button) => button.addEventListener("click", () => applyPositionStatus(button.dataset.positionStatus)));
+    $("ticker").addEventListener("change", () => restorePositionCost());
+    $("positionAverageCost").addEventListener("input", () => savePositionCost($("ticker").value, $("positionAverageCost").value));
     document.querySelectorAll(".range-btn").forEach((button) => button.addEventListener("click", async () => {
       document.querySelectorAll(".range-btn").forEach((item) => item.classList.remove("active"));
       button.classList.add("active"); await loadOverview(button.dataset.range);

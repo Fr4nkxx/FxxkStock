@@ -190,9 +190,9 @@ def test_run_request_position_is_optional_and_validated():
         ticker="159516.SZ",
         quick_model="quick",
         deep_model="deep",
-        position={"status": "held", "quantity": 1000, "average_cost": 1.72},
+        position={"status": "held", "average_cost": 1.72},
     )
-    assert held.position.quantity == 1000
+    assert held.position.quantity is None
 
     with pytest.raises(Exception):
         RunRequest(
