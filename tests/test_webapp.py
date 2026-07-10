@@ -312,6 +312,35 @@ def test_list_historical_reports(tmp_path):
 
 
 @pytest.mark.unit
+def test_historical_report_decision_prefers_portfolio_decision(tmp_path):
+    report_dir = tmp_path / "159516.SZ_20260706_113237"
+    decision_dir = report_dir / "5_portfolio"
+    decision_dir.mkdir(parents=True)
+    (report_dir / "complete_report.md").write_text(
+        "# Trading Analysis Report: 159516.SZ\n\n"
+        "## Audit\n\n"
+        "**建议**：下修评级至**Sell**。\n\n"
+        "## Portfolio Manager Decision\n\n"
+        "**Rating**: Hold",
+        encoding="utf-8",
+    )
+    (decision_dir / "decision.md").write_text(
+        "**Rating**: Hold\n\n"
+        "**Executive Summary**: 账户FLAT空仓不变，继续场外观望。",
+        encoding="utf-8",
+    )
+
+    from webapp.history import get_historical_report, list_historical_reports
+
+    items = list_historical_reports(tmp_path)
+    assert items[0]["decision"] == "HOLD"
+
+    detail = get_historical_report("159516.SZ_20260706_113237", tmp_path)
+    assert detail["decision"] == "HOLD"
+    assert "账户FLAT空仓不变" in detail["sections"]["summary"]
+
+
+@pytest.mark.unit
 def test_api_report_history(tmp_path):
     report_dir = tmp_path / "600353.SS_20260627_141703"
     report_dir.mkdir()
@@ -393,11 +422,22 @@ def test_analysis_progress_is_rendered_inside_stock_card():
         encoding="utf-8"
     )
     assert 'class="analysis-strip"' not in html
-    assert "stock-run-track" in html
-    assert "stock-run-fill" in html
-    assert "stock-run-stage" in html
-    assert "group.activeRun.percent" in html
+    assert "run-track" in html
+    assert "run-fill" in html
+    assert 'id="stageLine"' in html
+    assert "group.activeRun?.percent" in html
     assert 'id="debugBtn"' in html
+
+
+@pytest.mark.unit
+def test_decision_summary_is_compact_and_clamped():
+    html = (Path(__file__).parents[1] / "webapp" / "static" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert "-webkit-line-clamp: 6" in html
+    assert "function truncateText" in html
+    assert "function firstMeaningfulParagraph" in html
+    assert "summaryText(summary, data.core_insights)" in html
 
 
 @pytest.mark.unit

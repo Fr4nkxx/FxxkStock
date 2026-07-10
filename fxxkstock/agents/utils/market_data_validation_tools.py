@@ -15,9 +15,9 @@ def get_verified_market_snapshot(
 ) -> str:
     """Deterministic verification snapshot for exact market-data claims.
 
-    Returns the latest OHLCV row on or before curr_date, common technical
-    indicators, and recent closes. Call this before making exact claims about
-    price levels, Bollinger bands, RSI, MACD, moving averages, support /
-    resistance, or historical comparisons, and treat it as the source of truth.
+    Returns a current latest quote when available for the current analysis date,
+    plus the latest complete OHLCV row on or before curr_date, common technical
+    indicators, and recent closes. Use the latest quote for current-price and
+    action levels; use complete OHLCV rows for indicators and historical claims.
     """
     return build_verified_market_snapshot(symbol, curr_date, look_back_days)

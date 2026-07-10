@@ -19,6 +19,7 @@ from fxxkstock.dataflows.market_utils import (
     get_security_cn_name,
     is_cn_region,
 )
+from fxxkstock.dataflows.latest_quote import fetch_latest_market_quote
 from fxxkstock.dataflows.symbol_utils import normalize_symbol
 from fxxkstock.dataflows.utils import safe_ticker_component
 
@@ -85,10 +86,42 @@ def _extract_title(markdown: str) -> str:
     return ""
 
 
+def _normalize_decision_token(value: str | None) -> str | None:
+    token = (value or "").strip().strip("*`：:，,。.").upper()
+    cn_map = {
+        "买入": "BUY",
+        "增持": "OVERWEIGHT",
+        "持有": "HOLD",
+        "观望": "HOLD",
+        "减持": "UNDERWEIGHT",
+        "卖出": "SELL",
+        "等待": "WAIT",
+    }
+    if token in {"BUY", "SELL", "HOLD", "OVERWEIGHT", "UNDERWEIGHT", "WAIT"}:
+        return token
+    return cn_map.get((value or "").strip())
+
+
 def _extract_decision(markdown: str) -> str | None:
+    patterns = (
+        r"\*\*(?:Rating|评级)\*\*\s*[:：]\s*\**"
+        r"(Buy|Overweight|Hold|Underweight|Sell|Wait|买入|增持|持有|观望|减持|卖出|等待)\**",
+        r"(?:^|\n)\s*(?:Rating|评级)\s*[:：]\s*\**"
+        r"(Buy|Overweight|Hold|Underweight|Sell|Wait|买入|增持|持有|观望|减持|卖出|等待)\**",
+        r"FINAL TRANSACTION PROPOSAL\s*[:：]\s*\**"
+        r"(Buy|Overweight|Hold|Underweight|Sell|Wait|买入|增持|持有|观望|减持|卖出|等待)\**",
+        r"(?:最终交易建议|最终裁决)\s*[:：]\s*\**"
+        r"(买入|增持|持有|观望|减持|卖出|等待|Buy|Overweight|Hold|Underweight|Sell|Wait)\**",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, markdown, re.IGNORECASE | re.MULTILINE)
+        decision = _normalize_decision_token(match.group(1) if match else None)
+        if decision:
+            return decision
+
     upper = markdown.upper()
-    for token in ("BUY", "SELL", "HOLD", "OVERWEIGHT", "UNDERWEIGHT"):
-        if f"**{token}**" in upper or f"FINAL TRANSACTION PROPOSAL: **{token}**" in upper:
+    for token in ("BUY", "SELL", "HOLD", "OVERWEIGHT", "UNDERWEIGHT", "WAIT"):
+        if f"**{token}**" in upper:
             return token
     return None
 
@@ -120,6 +153,10 @@ def _extract_instrument_name(markdown: str, ticker: str) -> str | None:
 
 def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+
+
+def _read_decision_source(report_dir: Path, fallback_markdown: str) -> str:
+    return _read_text(report_dir / "5_portfolio" / "decision.md") or fallback_markdown
 
 
 def read_report_sections(report_dir: Path) -> dict[str, str]:
@@ -207,6 +244,7 @@ def list_historical_reports(reports_root: Path | None = None, limit: int = 100) 
         except OSError:
             mtime = 0
         markdown = report_file.read_text(encoding="utf-8", errors="replace")
+        decision_source = _read_decision_source(entry, markdown)
         items.append(
             {
                 "id": entry.name,
@@ -214,7 +252,7 @@ def list_historical_reports(reports_root: Path | None = None, limit: int = 100) 
                 "created_at": meta["created_at"],
                 "title": _extract_title(markdown) or meta["ticker"],
                 "name": _extract_instrument_name(markdown, meta["ticker"]),
-                "decision": _extract_decision(markdown),
+                "decision": _extract_decision(decision_source),
                 "report_dir": str(entry.resolve()),
                 "modified_at": mtime,
             }
@@ -243,6 +281,7 @@ def get_historical_report(report_id: str, reports_root: Path | None = None) -> d
         raise FileNotFoundError(report_id)
 
     markdown = report_file.read_text(encoding="utf-8")
+    decision_source = _read_decision_source(report_dir, markdown)
     meta = _parse_report_dir_name(report_id) or {"ticker": report_id, "created_at": ""}
     return {
         "id": report_id,
@@ -250,7 +289,7 @@ def get_historical_report(report_id: str, reports_root: Path | None = None) -> d
         "ticker": meta["ticker"],
         "created_at": meta["created_at"],
         "title": _extract_title(markdown) or meta["ticker"],
-        "decision": _extract_decision(markdown),
+        "decision": _extract_decision(decision_source),
         "markdown": markdown,
         "sections": read_report_sections(report_dir),
         "audit": read_audit_metadata(report_dir),
@@ -307,6 +346,8 @@ def get_stock_overview(
         "price_to_book": None,
         "market_cap": None,
         "turnover": None,
+        "price_basis": "latest_complete_ohlcv",
+        "source": "yfinance",
     }
     details = {
         "quote_type": identity.get("quote_type"),
@@ -439,6 +480,42 @@ def get_stock_overview(
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not load stock overview quote for %s: %s", ticker, exc)
+
+    if reports_root is None:
+        try:
+            latest_quote = fetch_latest_market_quote(ticker, region)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Could not load latest quote for %s: %s", ticker, exc)
+            latest_quote = None
+        if isinstance(latest_quote, dict) and latest_quote.get("last_price"):
+            quote["price_basis"] = "latest_quote"
+            quote["source"] = latest_quote.get("source") or quote["source"]
+            for source, target in (
+                ("last_price", "last_price"),
+                ("open", "open"),
+                ("high", "high"),
+                ("low", "low"),
+                ("previous_close", "previous_close"),
+                ("change", "change"),
+                ("change_percent", "change_percent"),
+                ("volume", "volume"),
+                ("turnover", "turnover"),
+                ("fifty_two_week_high", "fifty_two_week_high"),
+                ("fifty_two_week_low", "fifty_two_week_low"),
+                ("market_cap", "market_cap"),
+            ):
+                value = latest_quote.get(source)
+                if value is not None:
+                    quote[target] = value
+            if latest_quote.get("as_of"):
+                quote["as_of"] = latest_quote["as_of"]
+            if not identity.get("currency") and latest_quote.get("currency"):
+                identity["currency"] = latest_quote["currency"]
+            if quote["change"] is None and quote["previous_close"] not in (None, 0):
+                quote["change"] = quote["last_price"] - quote["previous_close"]
+                quote["change_percent"] = (
+                    quote["change"] / quote["previous_close"] * 100
+                )
 
     result = {
         "ticker": ticker,

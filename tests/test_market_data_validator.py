@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 import pytest
 
@@ -16,6 +18,7 @@ def _cny_fx_context(monkeypatch):
         "get_instrument_fx_context",
         lambda s, d: ("CNY", 1.0),
     )
+    monkeypatch.setattr(validator, "fetch_latest_market_quote", lambda s: None)
 
 
 def _sample_ohlcv() -> pd.DataFrame:
@@ -91,6 +94,69 @@ class TestVerifiedSnapshot:
 
         assert snapshot["latest_trading_date"] == "2026-05-20"
         assert snapshot["close"] == _sample_ohlcv()["Close"].iloc[-1]
+        assert snapshot["price_basis"] == "latest_complete_ohlcv"
+
+    def test_structured_snapshot_prefers_latest_quote_for_current_date(self, monkeypatch):
+        today = date.today().isoformat()
+        data = pd.DataFrame({
+            "Date": [pd.Timestamp(today)],
+            "Open": [99.0],
+            "High": [101.0],
+            "Low": [98.0],
+            "Close": [100.0],
+            "Volume": [1_000_000],
+        })
+        monkeypatch.setattr(validator, "load_ohlcv", lambda s, d: data)
+        monkeypatch.setattr(
+            validator,
+            "fetch_latest_market_quote",
+            lambda s: {
+                "source": "test",
+                "symbol": s,
+                "currency": "CNY",
+                "last_price": 102.25,
+                "open": 100.5,
+                "high": 103.0,
+                "low": 99.8,
+                "previous_close": 100.0,
+                "as_of": f"{today}T10:32:00",
+            },
+        )
+
+        snapshot = validator.build_current_market_snapshot_data("COF", today)
+
+        assert snapshot["price_basis"] == "latest_quote"
+        assert snapshot["close"] == 102.25
+        assert snapshot["latest_complete_ohlcv_close"] == 100.0
+        assert snapshot["latest_quote_source"] == "test"
+
+    def test_verified_snapshot_documents_latest_quote_when_available(self, monkeypatch):
+        today = date.today().isoformat()
+        data = pd.DataFrame({
+            "Date": [pd.Timestamp(today)],
+            "Open": [99.0],
+            "High": [101.0],
+            "Low": [98.0],
+            "Close": [100.0],
+            "Volume": [1_000_000],
+        })
+        monkeypatch.setattr(validator, "load_ohlcv", lambda s, d: data)
+        monkeypatch.setattr(
+            validator,
+            "fetch_latest_market_quote",
+            lambda s: {
+                "source": "test",
+                "currency": "CNY",
+                "last_price": 102.25,
+                "as_of": f"{today}T10:32:00",
+            },
+        )
+
+        snap = validator.build_verified_market_snapshot("COF", today)
+
+        assert "Current latest quote" in snap
+        assert "102.25 CNY" in snap
+        assert "OHLCV row and indicators below remain based on the latest complete trading row" in snap
 
     def test_detects_only_conflicting_current_price_claims(self):
         snapshot = {"close": 2.16}
