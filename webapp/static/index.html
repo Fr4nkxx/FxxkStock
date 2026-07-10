@@ -241,7 +241,7 @@
     }
     .stock-item {
       width: 100%;
-      min-height: 82px;
+      min-height: 62px;
       margin-bottom: 6px;
       padding: 10px;
       border: 1px solid transparent;
@@ -266,18 +266,15 @@
       white-space: nowrap;
       font-size: 14px;
     }
-    .stock-top span.name {
-      color: var(--muted);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
     .stock-top .badge { margin-left: auto; }
     .stock-meta {
       margin-top: 7px;
       color: var(--muted);
+      overflow: hidden;
       font-size: 11px;
       line-height: 1.4;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .stock-foot {
       justify-content: space-between;
@@ -410,7 +407,7 @@
 
     .decision-grid {
       display: grid;
-      grid-template-columns: minmax(310px, 1.1fr) minmax(260px, .85fr) minmax(260px, .85fr);
+      grid-template-columns: minmax(310px, 1.1fr) minmax(260px, .85fr);
       gap: 12px;
       align-items: stretch;
     }
@@ -476,15 +473,15 @@
       line-height: 1.25;
       overflow-wrap: anywhere;
     }
-    .change-panel, .action-panel, .market-panel, .progress-panel { padding: 15px; }
-    .change-list, .action-list, .event-list {
+    .change-panel, .action-panel, .market-panel { padding: 15px; }
+    .change-list, .action-list {
       display: grid;
       gap: 9px;
       margin: 0;
       padding: 0;
       list-style: none;
     }
-    .change-list li, .action-list li, .event-list li {
+    .change-list li, .action-list li {
       display: grid;
       grid-template-columns: 18px minmax(0, 1fr);
       gap: 8px;
@@ -506,7 +503,7 @@
 
     .market-progress-grid {
       display: grid;
-      grid-template-columns: minmax(320px, .9fr) minmax(420px, 1.1fr);
+      grid-template-columns: minmax(420px, 1.1fr) minmax(260px, .85fr);
       gap: 12px;
       margin-top: 12px;
     }
@@ -516,7 +513,7 @@
       gap: 12px;
       align-items: stretch;
     }
-    .price-box, .chart-wrap, .quote-cell, .stage {
+    .price-box, .chart-wrap, .quote-cell {
       border: 1px solid var(--line-soft);
       border-radius: 7px;
       background: var(--subtle-fill);
@@ -606,62 +603,6 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-    }
-
-    .stage-line {
-      display: grid;
-      grid-template-columns: repeat(6, minmax(0, 1fr));
-      gap: 8px;
-      margin-bottom: 13px;
-    }
-    .stage {
-      min-height: 76px;
-      padding: 10px;
-    }
-    .stage.done {
-      border-color: rgba(106, 189, 121, .34);
-      background: var(--accent-soft);
-    }
-    .stage.active {
-      border-color: rgba(81, 135, 215, .5);
-      background: var(--blue-soft);
-    }
-    .stage span {
-      display: block;
-      color: var(--muted);
-      font-size: 10px;
-      font-weight: 760;
-      text-transform: uppercase;
-    }
-    .stage strong {
-      display: block;
-      margin-top: 8px;
-      overflow: hidden;
-      color: var(--text-soft);
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .progress-footer {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-top: 12px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .progress-bar {
-      height: 7px;
-      flex: 1;
-      overflow: hidden;
-      border-radius: 999px;
-      background: var(--line-soft);
-    }
-    .progress-bar span {
-      display: block;
-      width: 0;
-      height: 100%;
-      border-radius: inherit;
-      background: var(--blue);
     }
 
     .reader-shell {
@@ -914,9 +855,7 @@
 
     @media (max-width: 1160px) {
       .decision-grid { grid-template-columns: minmax(0, 1fr) minmax(260px, .78fr); }
-      .action-panel { grid-column: 1 / -1; }
       .market-progress-grid { grid-template-columns: 1fr; }
-      .stage-line { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
 
     @media (max-width: 860px) {
@@ -968,7 +907,6 @@
       .market-progress-grid > *,
       .reader-shell > * { min-width: 0; }
       .metric-row, .quote-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .stage-line { grid-template-columns: 1fr; }
       .reader-nav {
         position: static;
         display: flex;
@@ -1043,10 +981,6 @@
             <ul class="change-list" id="changeList"><li><span class="dot blue"></span><span>选择标的后显示评级、版本和目标价变化。</span></li></ul>
           </article>
 
-          <article class="panel action-panel">
-            <div class="panel-title"><span>下一步动作</span><span class="badge blue">复盘行动</span></div>
-            <ul class="action-list" id="decisionNote"><li><span class="dot blue"></span><span>完成一次分析后，这里会显示核心观点和可执行检查项。</span></li></ul>
-          </article>
         </section>
 
         <section class="market-progress-grid">
@@ -1068,11 +1002,9 @@
             <div class="quote-grid" id="quoteGrid"></div>
           </article>
 
-          <article class="panel progress-panel">
-            <div class="panel-title"><span>运行态</span><span id="runStatus">等待任务</span></div>
-            <div class="stage-line" id="stageLine"></div>
-            <ul class="event-list" id="eventList"><li><span class="dot blue"></span><span>暂无正在运行的分析。</span></li></ul>
-            <div class="progress-footer"><span id="progressText">0%</span><div class="progress-bar"><span id="progressFill"></span></div></div>
+          <article class="panel action-panel">
+            <div class="panel-title"><span>下一步动作</span><span class="badge blue">复盘行动</span></div>
+            <ul class="action-list" id="decisionNote"><li><span class="dot blue"></span><span>完成一次分析后，这里会显示核心观点和可执行检查项。</span></li></ul>
           </article>
         </section>
 
@@ -1387,13 +1319,12 @@
           <button class="stock-item ${group.ticker === selectedTicker ? "active" : ""}" data-ticker="${escapeHtml(group.ticker)}" type="button">
             <div class="stock-top">
               <strong>${escapeHtml(group.ticker)}</strong>
-              <span class="name">${escapeHtml(group.name || group.ticker)}</span>
-              ${group.activeRun ? `<span class="badge blue">分析中</span>` : rating ? `<span class="badge ${tone}">${escapeHtml(label)}</span>` : `<span class="badge neutral">${group.pinned ? "自选" : "历史"}</span>`}
+              ${group.activeRun ? `<span class="badge blue">分析中</span>` : rating ? `<span class="badge ${tone}">${escapeHtml(label)}</span>` : `<span class="badge neutral">待分析</span>`}
             </div>
-            <div class="stock-meta">${escapeHtml(group.note || group.name || "历史分析")}</div>
+            <div class="stock-meta">${escapeHtml(group.name || group.ticker)}</div>
             ${group.activeRun
               ? `<div class="stock-foot"><div class="run-track"><span class="run-fill" style="width:${percent}%"></span></div><span>${Math.round(percent)}%</span></div>`
-              : `<div class="stock-foot"><span>${group.pinned ? "自选池" : "历史记录"}</span><span>${group.reports.length} 个版本</span></div>`}
+              : ""}
           </button>`;
       }).join("") : '<div class="empty-list">没有匹配的研究标的</div>';
       document.querySelectorAll(".stock-item").forEach((button) =>
@@ -1831,20 +1762,8 @@
       if (!run) return;
       run.events = [{ tone, text }, ...(run.events || [])].slice(0, 4);
     }
-    function renderRunPanel(run = activeRuns[selectedTicker]) {
-      const stages = new Set(run?.completedStages || []);
-      const percent = Math.max(0, Math.min(100, Number(run?.percent) || 0));
-      let activeStage = run ? STAGE_DEFS.find(([key]) => !stages.has(key))?.[0] : null;
-      if (percent >= 100) activeStage = null;
-      $("stageLine").innerHTML = STAGE_DEFS.map(([key, code, label]) => {
-        const state = stages.has(key) || percent >= 100 ? "done" : key === activeStage ? "active" : "";
-        return `<div class="stage ${state}"><span>${code}</span><strong>${label}</strong></div>`;
-      }).join("");
-      $("runStatus").textContent = run?.status || "等待任务";
-      $("progressText").textContent = `${Math.round(percent)}%`;
-      $("progressFill").style.width = `${percent}%`;
-      const events = run?.events?.length ? run.events : [{ tone: "blue", text: run ? "正在等待下一条运行事件。" : "暂无正在运行的分析。" }];
-      $("eventList").innerHTML = events.map((item) => `<li><span class="${dotClass(item.tone)}"></span><span>${escapeHtml(item.text)}</span></li>`).join("");
+    function renderRunPanel() {
+      // 运行态已收进侧栏对应股票卡片；进度更新由 renderStockList 呈现。
     }
     function setProgress(percent, text, ticker = selectedTicker) {
       const value = Math.max(0, Math.min(100, percent));

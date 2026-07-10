@@ -417,14 +417,16 @@ def test_report_name_extraction_prefers_ticker_parenthesized_name():
 
 
 @pytest.mark.unit
-def test_analysis_progress_is_rendered_inside_stock_card():
+def test_analysis_progress_is_rendered_inside_stock_card_without_main_run_panel():
     html = (Path(__file__).parents[1] / "webapp" / "static" / "index.html").read_text(
         encoding="utf-8"
     )
     assert 'class="analysis-strip"' not in html
     assert "run-track" in html
     assert "run-fill" in html
-    assert 'id="stageLine"' in html
+    assert 'id="stageLine"' not in html
+    assert 'id="runStatus"' not in html
+    assert 'id="eventList"' not in html
     assert "group.activeRun?.percent" in html
     assert 'id="debugBtn"' in html
 
