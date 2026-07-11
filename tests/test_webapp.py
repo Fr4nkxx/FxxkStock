@@ -67,6 +67,9 @@ def test_calendar_page_and_home_navigation_are_available():
     assert "data-delete-report" in home.text
     assert "function deleteStock" in home.text
     assert "function deleteReport" in home.text
+    assert ".run-fill {" in home.text
+    assert "display: block;" in home.text
+    assert "transition: width .28s ease;" in home.text
     assert "贵州茅台" not in response.text
     assert "五粮液" not in response.text
 
