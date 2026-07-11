@@ -241,6 +241,7 @@
       padding: 0 8px 14px;
     }
     .stock-item {
+      position: relative;
       width: 100%;
       min-height: 62px;
       margin-bottom: 6px;
@@ -248,6 +249,14 @@
       border: 1px solid transparent;
       border-radius: var(--radius);
       background: transparent;
+      text-align: left;
+    }
+    .stock-select {
+      width: 100%;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
       text-align: left;
     }
     .stock-item:hover { background: var(--subtle-fill); }
@@ -282,6 +291,29 @@
       margin-top: 8px;
       color: var(--faint);
       font-size: 11px;
+    }
+    .stock-item.active:not(:has(.stock-foot)) { padding-bottom: 36px; }
+    .danger-delete {
+      min-width: 46px;
+      height: 24px;
+      padding: 0 9px;
+      border: 1px solid rgba(239, 68, 68, .75);
+      border-radius: 5px;
+      background: rgba(127, 29, 29, .24);
+      color: #ff6b6b;
+      font-size: 11px;
+      font-weight: 760;
+    }
+    .danger-delete:hover {
+      border-color: #ef4444;
+      background: #b91c1c;
+      color: #fff;
+    }
+    .stock-delete {
+      position: absolute;
+      right: 9px;
+      bottom: 7px;
+      z-index: 2;
     }
     .run-track {
       height: 5px;
@@ -734,22 +766,33 @@
       border-radius: 7px;
     }
     .history-versions { display: grid; gap: 8px; }
-    .version-btn {
-      width: 100%;
-      min-height: 54px;
+    .version-row {
       display: grid;
-      grid-template-columns: 150px minmax(0, 1fr) auto;
-      gap: 10px;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 8px;
       align-items: center;
+      min-height: 54px;
+      padding: 7px 10px;
       border: 1px solid var(--line);
       border-radius: 7px;
       background: var(--subtle-fill);
-      text-align: left;
-      padding: 9px 10px;
     }
-    .version-btn.active {
+    .version-row.active {
       border-color: rgba(59, 165, 138, .48);
       background: var(--accent-soft);
+    }
+    .version-btn {
+      width: 100%;
+      min-height: 38px;
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      padding: 0;
     }
     .version-btn time { color: var(--muted); font-size: 12px; }
 
@@ -1356,21 +1399,30 @@
         const label = actionLabel(rating, context);
         const percent = Math.max(2, Math.min(100, Number(group.activeRun?.percent) || 0));
         return `
-          <button class="stock-item ${group.ticker === selectedTicker ? "active" : ""}" data-ticker="${escapeHtml(group.ticker)}" type="button">
-            <div class="stock-top">
-              <strong>${escapeHtml(group.ticker)}</strong>
-              ${group.activeRun ? `<span class="badge blue">分析中</span>` : rating ? `<span class="badge ${tone}">${escapeHtml(label)}</span>` : `<span class="badge neutral">待分析</span>`}
-            </div>
-            <div class="stock-meta">${escapeHtml(group.name || group.ticker)}</div>
-            ${group.activeRun
-              ? `<div class="stock-foot"><div class="run-track"><span class="run-fill" style="width:${percent}%"></span></div><span>${Math.round(percent)}%</span></div>`
-              : ""}
-          </button>`;
+          <div class="stock-item ${group.ticker === selectedTicker ? "active" : ""}">
+            <button class="stock-select" data-ticker="${escapeHtml(group.ticker)}" type="button">
+              <div class="stock-top">
+                <strong>${escapeHtml(group.ticker)}</strong>
+                ${group.activeRun ? `<span class="badge blue">分析中</span>` : rating ? `<span class="badge ${tone}">${escapeHtml(label)}</span>` : `<span class="badge neutral">待分析</span>`}
+              </div>
+              <div class="stock-meta">${escapeHtml(group.name || group.ticker)}</div>
+              ${group.activeRun
+                ? `<div class="stock-foot"><div class="run-track"><span class="run-fill" style="width:${percent}%"></span></div><span>${Math.round(percent)}%</span></div>`
+                : ""}
+            </button>
+            ${group.ticker === selectedTicker && !group.activeRun ? `<button class="danger-delete stock-delete" data-delete-ticker="${escapeHtml(group.ticker)}" type="button">删除</button>` : ""}
+          </div>`;
       }).join("") : '<div class="empty-list">没有匹配的研究标的</div>';
-      document.querySelectorAll(".stock-item").forEach((button) =>
+      document.querySelectorAll(".stock-select").forEach((button) =>
         button.addEventListener("click", () => {
           document.body.classList.remove("sidebar-open");
           selectStock(button.dataset.ticker);
+        })
+      );
+      document.querySelectorAll("[data-delete-ticker]").forEach((button) =>
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          deleteStock(button.dataset.deleteTicker);
         })
       );
       renderPinState();
@@ -1382,6 +1434,35 @@
       stockGroups = mergeWorklist(groupHistory(historyItems));
       renderStockList();
       if (selectFirst && !selectedTicker && stockGroups.length) await selectStock(stockGroups[0].ticker);
+    }
+
+    async function deleteStock(ticker) {
+      const key = String(ticker || "").toUpperCase();
+      if (!key || !window.confirm(`确定删除 ${key} 吗？\n该股票的全部本地分析报告也会被删除。`)) return;
+      const response = await fetch(`/api/stocks/${encodeURIComponent(key)}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        window.alert(payload.detail || "删除股票失败");
+        return;
+      }
+      watchlist = watchlist.filter((item) => String(item.ticker || "").toUpperCase() !== key);
+      saveWatchlist();
+      const costs = readJson(POSITION_COSTS_KEY, {});
+      delete costs[key];
+      localStorage.setItem(POSITION_COSTS_KEY, JSON.stringify(costs));
+      if (selectedTicker === key) {
+        selectedTicker = null;
+        selectedReportId = null;
+        localStorage.removeItem(SELECTED_TICKER_KEY);
+        clearReport();
+      }
+      await loadHistory(false);
+      if (!selectedTicker && stockGroups.length) await selectStock(stockGroups[0].ticker);
+      else if (!stockGroups.length) {
+        $("instrumentName").textContent = "选择一只股票开始研究";
+        $("instrumentMeta").textContent = "侧边栏暂无股票";
+        renderRunPanel();
+      }
     }
 
     function quoteCells(overview) {
@@ -1714,15 +1795,35 @@
       renderReportTab(activeReportTab);
       if (selectedTicker) await loadCalibration(selectedTicker);
     }
+    async function deleteReport(reportId) {
+      if (!reportId || !window.confirm("确定删除这份历史报告吗？此操作无法撤销。")) return;
+      const encodedId = String(reportId).split("/").map(encodeURIComponent).join("/");
+      const response = await fetch(`/api/reports/history/${encodedId}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        window.alert(payload.detail || "删除报告失败");
+        return;
+      }
+      selectedReportId = null;
+      currentReport = { markdown: "", sections: {} };
+      await loadHistory(false);
+      const reports = getGroup(selectedTicker)?.reports || [];
+      if (reports.length) await loadReport(reports[0].id);
+      else clearReport();
+      renderReportTab("history");
+    }
     function renderHistoryVersions() {
       const group = getGroup(selectedTicker);
       const reports = group?.reports || [];
       return `<div class="history-versions">${reports.map((item) => `
-        <button class="version-btn ${item.id === selectedReportId ? "active" : ""}" data-version="${escapeHtml(item.id)}" type="button">
-          <time>${escapeHtml(formatDate(item.created_at).slice(0, 16))}</time>
-          <span>分析报告</span>
+        <div class="version-row ${item.id === selectedReportId ? "active" : ""}">
+          <button class="version-btn" data-version="${escapeHtml(item.id)}" type="button">
+            <time>${escapeHtml(formatDate(item.created_at).slice(0, 16))}</time>
+            <span>分析报告</span>
+          </button>
+          ${item.id === selectedReportId ? `<button class="danger-delete" data-delete-report="${escapeHtml(item.id)}" type="button">删除</button>` : ""}
           ${item.decision ? `<span class="badge ${decisionTone(item.decision)}">${escapeHtml(actionLabel(item.decision, item.id === selectedReportId ? reportContext(currentReport) : ""))}</span>` : ""}
-        </button>`).join("") || '<div class="empty-report">暂无历史版本</div>'}</div>`;
+        </div>`).join("") || '<div class="empty-report">暂无历史版本</div>'}</div>`;
     }
     function renderReportTab(tab) {
       activeReportTab = tab;
@@ -1736,6 +1837,7 @@
       if (tab === "history") {
         $("reportContent").innerHTML = renderHistoryVersions();
         document.querySelectorAll(".version-btn").forEach((button) => button.addEventListener("click", () => loadReport(button.dataset.version)));
+        document.querySelectorAll("[data-delete-report]").forEach((button) => button.addEventListener("click", () => deleteReport(button.dataset.deleteReport)));
         return;
       }
       if (tab === "calibration") {

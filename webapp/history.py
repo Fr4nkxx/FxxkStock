@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path
@@ -493,6 +494,46 @@ def get_historical_report(report_id: str, reports_root: Path | None = None) -> d
         "core_insights": read_core_insights(report_dir),
         "report_dir": str(report_dir),
     }
+
+
+def delete_historical_report(report_id: str, reports_root: Path | None = None) -> dict[str, Any]:
+    """Delete one validated report directory and prune an empty ticker folder."""
+    _validate_report_id(report_id)
+    root = (reports_root or get_reports_root()).resolve()
+    report_dir = root.joinpath(*report_id.split("/")).resolve()
+    try:
+        report_dir.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("invalid report path") from exc
+    if not (report_dir / "complete_report.md").is_file():
+        raise FileNotFoundError(report_id)
+    shutil.rmtree(report_dir)
+    parent = report_dir.parent
+    if parent != root and parent.parent == root and not any(parent.iterdir()):
+        parent.rmdir()
+    _overview_cache.clear()
+    return {"deleted": True, "report_id": report_id}
+
+
+def delete_stock_reports(ticker: str, reports_root: Path | None = None) -> dict[str, Any]:
+    """Delete all nested and legacy report directories for one ticker."""
+    ticker = normalize_symbol(ticker.strip()).upper()
+    safe_ticker_component(ticker)
+    root = reports_root or get_reports_root()
+    if not root.is_dir():
+        return {"deleted": True, "ticker": ticker, "reports_deleted": 0}
+    matches = [
+        (report_dir, report_id)
+        for report_dir, report_id in _iter_report_directories(root)
+        if (_parse_report_dir_name(report_id) or {}).get("ticker", "").upper() == ticker
+    ]
+    for report_dir, _ in matches:
+        shutil.rmtree(report_dir)
+    ticker_dir = root / ticker
+    if ticker_dir.is_dir() and not any(ticker_dir.iterdir()):
+        ticker_dir.rmdir()
+    _overview_cache.clear()
+    return {"deleted": True, "ticker": ticker, "reports_deleted": len(matches)}
 
 
 def get_stock_overview(

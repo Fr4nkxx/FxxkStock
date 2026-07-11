@@ -63,6 +63,10 @@ def test_calendar_page_and_home_navigation_are_available():
     assert "function renderSelectedDate" in response.text
     assert 'fetch("/api/calendar/nodes")' in response.text
     assert "function renderWeekAndConditions" in response.text
+    assert "data-delete-ticker" in home.text
+    assert "data-delete-report" in home.text
+    assert "function deleteStock" in home.text
+    assert "function deleteReport" in home.text
     assert "贵州茅台" not in response.text
     assert "五粮液" not in response.text
 
@@ -354,6 +358,38 @@ def test_nested_report_layout_is_listed_and_read(tmp_path):
 
 
 @pytest.mark.unit
+def test_delete_historical_report_and_prune_ticker_directory(tmp_path):
+    report_dir = tmp_path / "600353.SS" / "20260628_091530"
+    report_dir.mkdir(parents=True)
+    (report_dir / "complete_report.md").write_text("# Report", encoding="utf-8")
+
+    from webapp.history import delete_historical_report
+
+    result = delete_historical_report("600353.SS/20260628_091530", tmp_path)
+    assert result == {"deleted": True, "report_id": "600353.SS/20260628_091530"}
+    assert not report_dir.exists()
+    assert not (tmp_path / "600353.SS").exists()
+
+
+@pytest.mark.unit
+def test_delete_stock_reports_removes_nested_and_legacy_layouts(tmp_path):
+    nested = tmp_path / "600353.SS" / "20260628_091530"
+    legacy = tmp_path / "600353.SS_20260627_141703"
+    other = tmp_path / "159819.SZ" / "20260711_120000"
+    for report_dir in (nested, legacy, other):
+        report_dir.mkdir(parents=True)
+        (report_dir / "complete_report.md").write_text("# Report", encoding="utf-8")
+
+    from webapp.history import delete_stock_reports
+
+    result = delete_stock_reports("600353.SS", tmp_path)
+    assert result["reports_deleted"] == 2
+    assert not nested.exists()
+    assert not legacy.exists()
+    assert other.exists()
+
+
+@pytest.mark.unit
 def test_legacy_review_trigger_is_backfilled_into_calendar_nodes(tmp_path):
     report_dir = tmp_path / "159819.SZ" / "20260711_120000"
     portfolio = report_dir / "5_portfolio"
@@ -456,6 +492,25 @@ def test_api_report_history(tmp_path):
         detail = client.get("/api/reports/history/600353.SS/20260628_091530")
         assert detail.status_code == 200
         nested_loader.assert_called_once_with("600353.SS/20260628_091530")
+
+    with patch("webapp.server.delete_historical_report", return_value={
+        "deleted": True,
+        "report_id": "600353.SS/20260628_091530",
+    }) as report_deleter:
+        deleted = client.delete("/api/reports/history/600353.SS/20260628_091530")
+        assert deleted.status_code == 200
+        report_deleter.assert_called_once_with("600353.SS/20260628_091530")
+
+    RUNS.clear()
+    with patch("webapp.server.delete_stock_reports", return_value={
+        "deleted": True,
+        "ticker": "600353.SS",
+        "reports_deleted": 2,
+    }) as stock_deleter:
+        deleted = client.delete("/api/stocks/600353.SS")
+        assert deleted.status_code == 200
+        assert deleted.json()["reports_deleted"] == 2
+        stock_deleter.assert_called_once_with("600353.SS")
 
     with patch("webapp.server.list_calendar_nodes", return_value=[{
         "id": "159819.SZ/20260711_120000#0",

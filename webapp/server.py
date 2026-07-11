@@ -21,6 +21,8 @@ from fxxkstock.default_config import DEFAULT_CONFIG
 from fxxkstock.dataflows.chrome_manager import ChromeManager
 
 from .history import (
+    delete_historical_report,
+    delete_stock_reports,
     get_historical_report,
     get_stock_overview,
     list_calendar_nodes,
@@ -270,6 +272,19 @@ def list_report_history(limit: int = 100) -> dict[str, Any]:
     return {"reports": items}
 
 
+@app.delete("/api/stocks/{ticker}")
+def delete_stock(ticker: str) -> dict[str, Any]:
+    if any(
+        state.ticker.upper() == ticker.strip().upper() and state.status in {"queued", "running"}
+        for state in RUNS.values()
+    ):
+        raise HTTPException(status_code=409, detail="该股票正在分析，暂时不能删除")
+    try:
+        return delete_stock_reports(ticker)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/calendar/nodes")
 def get_calendar_nodes() -> dict[str, Any]:
     return {"nodes": list_calendar_nodes()}
@@ -420,6 +435,16 @@ def get_stock_overview_api(ticker: str, range: str = "1d") -> dict[str, Any]:
 def get_report_history_item(report_id: str) -> dict[str, Any]:
     try:
         return get_historical_report(report_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/reports/history/{report_id:path}")
+def delete_report_history_item(report_id: str) -> dict[str, Any]:
+    try:
+        return delete_historical_report(report_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
