@@ -7,6 +7,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## [0.4.0] — 2026-07-11
+
+Research-workbench release: a redesigned Web interface, actionable portfolio
+decisions, persistent position context, calendar-based review planning, and
+more resilient China-market data handling.
+
+### Added
+
+- **Node calendar.** Review dates, execution deadlines, risk checks, and
+  event-driven conditions from the latest report are aggregated into a monthly
+  calendar with day details, month navigation, and upcoming-node views.
+- **Structured next actions.** Portfolio decisions now expose a stable current
+  action, execution condition, risk boundary, and review nodes for consistent
+  UI rendering and downstream scheduling.
+- **Persistent cost basis.** The latest entered holding cost is remembered per
+  ticker while share quantity is no longer required.
+- **Nested report storage.** Reports are organized by ticker and then analysis
+  timestamp, with calendar metadata saved alongside each report.
+
+### Changed
+
+- **Web research workbench.** Reworked the main dashboard into a compact 2-2-1
+  layout, moved run progress into each sidebar ticker card, simplified ticker
+  summaries, and consolidated report history into the research directory.
+- **Localized instrument identity.** Improved Chinese-name resolution for ETFs
+  and other China-market instruments while preventing stale English-name cache
+  entries from overriding better localized names.
+- **Analysis workflow.** Report localization and inline progress reporting are
+  clearer, and held-position context is passed consistently into analysis.
+- **Documentation.** Added node-calendar behavior, report paths, API details,
+  and screenshots from the actual Web workbench.
+
+### Fixed
+
+- **Market-data resilience.** yfinance rate limits and partial quote failures
+  degrade gracefully instead of aborting the entire analysis.
+- **Calendar extraction.** Explicit dates mentioned inside execution and review
+  text are synchronized into calendar nodes, while weekdays are computed from
+  validated ISO dates to avoid model-generated weekday errors.
+
 ## [0.3.0] — 2026-06-22
 
 Stabilization and extensibility release: a CI gate, a unified verified
@@ -399,6 +439,8 @@ PRs from late 2025 also landed here.
   portfolio manager. LangGraph orchestration, yfinance data, per-agent
   BM25 memory, single-provider OpenAI integration, interactive CLI.
 
+[0.4.0]: https://github.com/Fr4nkxx/FxxkStock/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/Fr4nkxx/FxxkStock/releases/tag/v0.3.0
 [0.2.4]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.1...v0.2.2
