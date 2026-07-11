@@ -2,6 +2,7 @@
 programmatic API alike (#1037)."""
 
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -32,6 +33,35 @@ def test_write_report_tree_creates_files(tmp_path):
     complete = out.read_text()
     assert "Trading Analysis Report: AAPL" in complete
     assert "MKT" in complete and "PM DECISION" in complete
+
+
+@pytest.mark.unit
+def test_write_report_tree_persists_calendar_nodes(tmp_path):
+    state = _state()
+    state["trade_date"] = "2026-07-11"
+    state["portfolio_decision_metadata"] = {
+        "rating": "Overweight",
+        "next_action": "Add",
+        "execution_condition": "Break above 1.10 on volume.",
+        "risk_boundary": "Close below 1.00.",
+        "review_nodes": [{
+            "node_type": "review",
+            "trigger_type": "date",
+            "calendar_date": "2026-07-13",
+            "event": None,
+            "action": "Run FC01 test.",
+        }],
+    }
+
+    write_report_tree(state, "159819.SZ", tmp_path)
+    payload = json.loads((tmp_path / "calendar_nodes.json").read_text())
+
+    assert payload["ticker"] == "159819.SZ"
+    assert payload["analysis_date"] == "2026-07-11"
+    assert payload["nodes"][0]["calendar_date"] == "2026-07-13"
+    assert {item["node_type"] for item in payload["nodes"]} == {
+        "review", "execution", "risk"
+    }
 
 
 @pytest.mark.unit
@@ -111,6 +141,24 @@ def test_unknown_position_is_omitted_from_report():
 
 
 @pytest.mark.unit
+def test_cost_only_position_report_omits_quantity_and_money_values():
+    report = render_account_position_section({
+        "status": "held",
+        "quantity": None,
+        "average_cost": 1.932,
+        "current_price": 2.228,
+        "currency": "CNY",
+        "unrealized_return_pct": 15.3209,
+    })
+
+    assert "持股数量" not in report
+    assert "当前市值" not in report
+    assert "浮动盈亏" not in report
+    assert "| 真实平均成本 | 1.932 CNY |" in report
+    assert "| 浮动收益率 | 15.32% |" in report
+
+
+@pytest.mark.unit
 def test_save_reports_explicit_path(tmp_path):
     # Unbound: with an explicit save_path, the method doesn't touch self/config.
     out = FxxKStockGraph.save_reports(None, _state(), "AAPL", save_path=tmp_path)
@@ -123,5 +171,6 @@ def test_save_reports_defaults_under_results_dir(tmp_path):
     mock_self = SimpleNamespace(config={"results_dir": str(tmp_path)})
     out = FxxKStockGraph.save_reports(mock_self, _state(), "AAPL")
     assert out.exists()
-    assert out.parent.parent.name == "reports"  # results_dir/reports/AAPL_<stamp>/...
-    assert out.parent.name.startswith("AAPL_")
+    assert out.parent.parent.name == "AAPL"
+    assert out.parent.parent.parent.name == "reports"
+    assert re.fullmatch(r"\d{8}_\d{6}", out.parent.name)

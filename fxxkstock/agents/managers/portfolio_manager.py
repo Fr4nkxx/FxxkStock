@@ -11,6 +11,7 @@ back gracefully to free-text generation.
 from __future__ import annotations
 
 import logging
+from datetime import date
 
 from fxxkstock.agents.schemas import PortfolioDecision, render_pm_decision
 from fxxkstock.agents.utils.agent_utils import (
@@ -56,6 +57,7 @@ def create_portfolio_manager(llm):
         falsification_audit = (state.get("falsification_audit") or {}).get(
             "markdown", ""
         )
+        analysis_date = str(state.get("trade_date") or date.today().isoformat())
 
         past_context = state.get("past_context", "")
         lessons_line = (
@@ -93,6 +95,13 @@ def create_portfolio_manager(llm):
 **Independent Falsification Audit:**
 {falsification_audit}
 
+**Authoritative Calendar Context:**
+- Analysis date: {analysis_date}
+- Calendar dates must use ISO YYYY-MM-DD and must not contain a written weekday.
+- The application computes and displays weekdays from the ISO date.
+- Do not invent a date for an event whose date is not supported by the evidence;
+  emit it as an event-triggered review node instead.
+
 ---
 
 Be decisive and ground every conclusion in specific evidence from the analysts.
@@ -105,6 +114,19 @@ For free-text fallback, include exactly these fields with Low/Medium/High values
 **Data Confidence**, **Data Confidence Reason**, **Thesis Confidence**,
 **Thesis Confidence Reason**, **Execution Confidence**, and
 **Execution Confidence Reason**.
+Also include exactly these four action fields: **Next Action** (exactly one of
+Buy / Add / Hold / Reduce / Exit / Wait), **Execution Condition**,
+**Risk Boundary**, and **Review Trigger**. Each condition must be concise,
+observable, and directly supported by the current analysis. For a held position,
+use Add / Hold / Reduce / Exit; for a flat or unknown position, use Buy / Wait.
+Return one to six Review Nodes. Date nodes require an exact supported ISO date;
+event nodes require an observable event and no date. Never put a weekday name in
+the node action or event. For free-text fallback, render each node under
+"## Review Nodes" as `- [date][review] YYYY-MM-DD: action` or
+`- [event][review] event name: action` (execution/risk may replace review).
+Every explicit calendar date mentioned anywhere in Execution Condition, Risk
+Boundary, or Review Trigger must have a matching date Review Node; do not leave a
+deadline embedded only in prose.
 Use cost basis only for risk management; never anchor the decision on breaking even.
 Never describe a market low, technical level, prior-report price, or proposed entry
 as the user's cost basis. If you mention the user's cost or P/L, copy only the exact

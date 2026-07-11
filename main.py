@@ -100,7 +100,8 @@ def main() -> None:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         save_path = (
             args.reports_dir
-            / f"{safe_ticker_component(args.ticker)}_{stamp}"
+            / safe_ticker_component(args.ticker)
+            / stamp
         )
         out = ta.save_reports(final_state, args.ticker, save_path=save_path)
         print(f"Report saved to: {out}")

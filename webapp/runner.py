@@ -443,7 +443,7 @@ def run_analysis(state: RunState, params: RunParams) -> None:
         state.final_state = final_state
 
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_path = reports_dir / f"{safe_ticker_component(params.ticker)}_{stamp}"
+        save_path = reports_dir / safe_ticker_component(params.ticker) / stamp
         report_file = write_report_tree(final_state, params.ticker, save_path)
         state.report_path = report_file.parent
         state.decision = graph.process_signal(final_state.get("final_trade_decision", ""))

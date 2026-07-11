@@ -175,6 +175,7 @@
       gap: 8px;
       border: 1px solid transparent;
       white-space: nowrap;
+      text-decoration: none;
     }
     .primary-btn {
       padding: 0 14px;
@@ -488,6 +489,19 @@
       align-items: start;
       color: var(--text-soft);
       line-height: 1.45;
+    }
+    .action-copy { min-width: 0; }
+    .action-copy strong {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 780;
+      letter-spacing: .04em;
+    }
+    .action-copy span {
+      display: block;
+      overflow-wrap: anywhere;
     }
     .dot {
       width: 8px;
@@ -952,8 +966,8 @@
         <div class="title-block"><h1 id="instrumentName">选择一个分析标的</h1><p id="instrumentMeta">从左侧研究池选择，或新建分析</p></div>
         <span class="theme-note"><i data-lucide="palette" class="icon"></i>工作台 v1</span>
         <button class="icon-btn" id="themeToggle" type="button" aria-label="切换昼夜主题"><i data-lucide="moon" class="icon"></i></button>
+        <a class="ghost-btn calendar-link" href="/calendar"><i data-lucide="calendar-days" class="icon"></i>节点日历</a>
         <button class="ghost-btn" id="pinTickerBtn" type="button"><i data-lucide="star" class="icon"></i><span>加入自选</span></button>
-        <button class="ghost-btn" id="versionsBtn" type="button"><i data-lucide="history" class="icon"></i>历史版本</button>
         <button class="primary-btn" id="reanalyzeBtn" type="button"><i data-lucide="refresh-cw" class="icon"></i>重新分析</button>
         <button class="icon-btn" id="debugBtn" type="button" aria-label="查看运行日志"><i data-lucide="bug" class="icon"></i></button>
         <button class="icon-btn" id="settingsBtn" type="button" aria-label="设置"><i data-lucide="settings" class="icon"></i></button>
@@ -1004,7 +1018,12 @@
 
           <article class="panel action-panel">
             <div class="panel-title"><span>下一步动作</span><span class="badge blue">复盘行动</span></div>
-            <ul class="action-list" id="decisionNote"><li><span class="dot blue"></span><span>完成一次分析后，这里会显示核心观点和可执行检查项。</span></li></ul>
+            <ul class="action-list" id="decisionNote">
+              <li><span class="dot blue"></span><div class="action-copy"><strong>当前动作</strong><span>等待报告</span></div></li>
+              <li><span class="dot blue"></span><div class="action-copy"><strong>执行条件</strong><span>等待报告</span></div></li>
+              <li><span class="dot amber"></span><div class="action-copy"><strong>风险边界</strong><span>等待报告</span></div></li>
+              <li><span class="dot ok"></span><div class="action-copy"><strong>复盘节点</strong><span>等待报告</span></div></li>
+            </ul>
           </article>
         </section>
 
@@ -1482,6 +1501,10 @@
       const aliases = {
         "Price Target": ["Price Target", "目标价", "Target Price"],
         "Time Horizon": ["Time Horizon", "时间范围", "时间周期", "Horizon"],
+        "Next Action": ["Next Action", "Current Action", "当前动作"],
+        "Execution Condition": ["Execution Condition", "执行条件"],
+        "Risk Boundary": ["Risk Boundary", "风险边界", "失效条件"],
+        "Review Trigger": ["Review Trigger", "Review Point", "复盘节点", "复盘条件"],
       }[label] || [label];
       for (const item of aliases) {
         const pattern = new RegExp(`\\*\\*${item}\\*\\*\\s*[:：]\\s*([^\\n]+)`, "i");
@@ -1543,26 +1566,29 @@
       const plain = plainText(source);
       return truncateText(plain || "暂无摘要");
     }
-    function corePoints(markdown) {
-      const plain = summaryText(markdown);
-      if (!plain || plain === "暂无摘要") return ["暂无摘要"];
-      let points = plain
-        .split(/(?<=[。！？；.!?;])\s*/)
-        .map((point) => point.trim())
-        .filter(Boolean);
-      if (points.length === 1 && plain.length > 140) {
-        points = plain
-          .split(/(?:，|,)\s*(?=(?:当前|本轮|成本|风险|建议|维持|等待|如果|若|同时))/)
-          .map((point) => point.trim())
-          .filter(Boolean);
-      }
-      return points.slice(0, 5);
+    function nextActionLabel(value, rating = "") {
+      const normalized = String(value || "").trim().toLowerCase();
+      const labels = {
+        buy: "买入", add: "加仓", hold: "持有",
+        reduce: "减仓", exit: "清仓", wait: "观望",
+        买入: "买入", 加仓: "加仓", 持有: "持有",
+        减仓: "减仓", 清仓: "清仓", 观望: "观望",
+      };
+      if (labels[normalized]) return labels[normalized];
+      return actionLabel(rating) || "未提供（旧报告）";
     }
-    function renderCorePoints(markdown, generatedInsights = []) {
-      const points = Array.isArray(generatedInsights) && generatedInsights.length
-        ? generatedInsights.slice(0, 5)
-        : corePoints(markdown);
-      $("decisionNote").innerHTML = points.map((point, index) => `<li><span class="${dotClass(index === 0 ? "blue" : index === 1 ? "amber" : "ok")}"></span><span>${escapeHtml(point)}</span></li>`).join("");
+    function renderNextActions(markdown, rating = "") {
+      const waiting = !String(markdown || "").trim();
+      const rows = [
+        ["blue", "当前动作", nextActionLabel(parseField(markdown, "Next Action"), rating)],
+        ["blue", "执行条件", parseField(markdown, "Execution Condition")],
+        ["amber", "风险边界", parseField(markdown, "Risk Boundary")],
+        ["ok", "复盘节点", parseField(markdown, "Review Trigger")],
+      ];
+      $("decisionNote").innerHTML = rows.map(([tone, label, value]) => {
+        const display = waiting ? "等待报告" : value && value !== "-" ? value : "未提供（旧报告）";
+        return `<li><span class="${dotClass(tone)}"></span><div class="action-copy"><strong>${label}</strong><span>${escapeHtml(display)}</span></div></li>`;
+      }).join("");
     }
     function renderChangeList(data, summary) {
       const group = getGroup(selectedTicker);
@@ -1606,7 +1632,7 @@
       $("decisionDataConfidence").textContent = confidenceLabel(audit.confidence?.data?.level);
       $("decisionThesisConfidence").textContent = confidenceLabel(audit.confidence?.thesis?.level);
       $("decisionExecutionConfidence").textContent = confidenceLabel(audit.confidence?.execution?.level);
-      renderCorePoints(summary, data.core_insights);
+      renderNextActions(summary, rating);
       renderChangeList(data, summary);
     }
     function clearReport() {
@@ -1624,7 +1650,7 @@
       ].forEach((id) => $(id).textContent = "-");
       $("changeMeta").textContent = "-";
       $("changeList").innerHTML = '<li><span class="dot blue"></span><span>暂无历史报告可对比。</span></li>';
-      $("decisionNote").innerHTML = '<li><span class="dot blue"></span><span>完成一次分析后，这里会显示核心观点和可执行检查项。</span></li>';
+      renderNextActions("");
     }
     async function loadCalibration(ticker) {
       currentCalibration = null;
@@ -1677,7 +1703,8 @@
       if (changed) renderStockList();
     }
     async function loadReport(reportId) {
-      const response = await fetch(`/api/reports/history/${encodeURIComponent(reportId)}`);
+      const encodedId = String(reportId || "").split("/").map(encodeURIComponent).join("/");
+      const response = await fetch(`/api/reports/history/${encodedId}`);
       if (!response.ok) return;
       selectedReportId = reportId;
       currentReport = await response.json();
@@ -2053,7 +2080,6 @@
     $("themeToggle").addEventListener("click", toggleTheme);
     $("settingsBtn").addEventListener("click", () => { window.location.href = "/settings"; });
     $("debugBtn").addEventListener("click", () => openModal("debugModal"));
-    $("versionsBtn").addEventListener("click", () => renderReportTab("history"));
     $("exportBtn").addEventListener("click", exportReport);
     $("runBtn").addEventListener("click", startRun);
     $("provider").addEventListener("change", refreshModels);

@@ -23,6 +23,7 @@ from fxxkstock.dataflows.chrome_manager import ChromeManager
 from .history import (
     get_historical_report,
     get_stock_overview,
+    list_calendar_nodes,
     list_historical_reports,
     read_audit_metadata,
     read_report_sections,
@@ -133,6 +134,14 @@ def settings_page() -> FileResponse:
     html_path = STATIC_DIR / "settings.html"
     if not html_path.is_file():
         raise HTTPException(status_code=404, detail="settings.html not found")
+    return FileResponse(html_path)
+
+
+@app.get("/calendar")
+def calendar_page() -> FileResponse:
+    html_path = STATIC_DIR / "calendar.html"
+    if not html_path.is_file():
+        raise HTTPException(status_code=404, detail="calendar.html not found")
     return FileResponse(html_path)
 
 
@@ -259,6 +268,11 @@ def get_run_status(run_id: str) -> dict[str, Any]:
 def list_report_history(limit: int = 100) -> dict[str, Any]:
     items = list_historical_reports(limit=limit)
     return {"reports": items}
+
+
+@app.get("/api/calendar/nodes")
+def get_calendar_nodes() -> dict[str, Any]:
+    return {"nodes": list_calendar_nodes()}
 
 
 @app.get("/api/memory/{ticker}")
@@ -402,7 +416,7 @@ def get_stock_overview_api(ticker: str, range: str = "1d") -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/api/reports/history/{report_id}")
+@app.get("/api/reports/history/{report_id:path}")
 def get_report_history_item(report_id: str) -> dict[str, Any]:
     try:
         return get_historical_report(report_id)
