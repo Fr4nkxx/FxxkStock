@@ -120,6 +120,12 @@ class FxxKStockGraph:
             self.deep_thinking_llm,
             self.tool_nodes,
             self.conditional_logic,
+            parallel_initial_analysts=bool(
+                self.config.get("parallel_initial_analysts", False)
+            ),
+            parallel_initial_analyst_workers=int(
+                self.config.get("parallel_initial_analyst_workers", 4)
+            ),
         )
 
         self.propagator = Propagator(

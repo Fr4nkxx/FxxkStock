@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -42,16 +41,22 @@ def test_general_settings_persist_and_update_runtime(tmp_path, monkeypatch):
         result = settings_store.save_general_settings(
             {
                 "web_research_depth": "medium",
+                "cn_market_data_source": "eastmoney",
                 "cn_guba_post_limit": 25,
                 "cn_browser_auto_start": False,
+                "parallel_initial_analysts": False,
             }
         )
         assert result["web_research_depth"] == "medium"
+        assert result["cn_market_data_source"] == "eastmoney"
         assert settings_store.DEFAULT_CONFIG["max_debate_rounds"] == 3
         assert settings_store.DEFAULT_CONFIG["cn_guba_post_limit"] == 25
+        assert settings_store.DEFAULT_CONFIG["parallel_initial_analysts"] is False
         text = env_path.read_text(encoding="utf-8")
         assert "FXXKSTOCK_WEB_RESEARCH_DEPTH='medium'" in text
+        assert "FXXKSTOCK_CN_MARKET_DATA_SOURCE='eastmoney'" in text
         assert "FXXKSTOCK_CN_GUBA_POST_LIMIT='25'" in text
+        assert "FXXKSTOCK_PARALLEL_INITIAL_ANALYSTS='false'" in text
     finally:
         settings_store.DEFAULT_CONFIG.clear()
         settings_store.DEFAULT_CONFIG.update(previous)

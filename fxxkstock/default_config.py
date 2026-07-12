@@ -41,6 +41,9 @@ _ENV_OVERRIDES = {
     "FXXKSTOCK_FUNDAMENTALS_TTL_DAYS": "ticker_memory_fundamentals_ttl_days",
     "FXXKSTOCK_WEB_RESEARCH_DEPTH":   "web_research_depth",
     "FXXKSTOCK_WEB_ANALYSIS_MODE":    "web_analysis_mode",
+    "FXXKSTOCK_CN_MARKET_DATA_SOURCE": "cn_market_data_source",
+    "FXXKSTOCK_PARALLEL_INITIAL_ANALYSTS": "parallel_initial_analysts",
+    "FXXKSTOCK_PARALLEL_INITIAL_ANALYST_WORKERS": "parallel_initial_analyst_workers",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
     # interactive choice, which is skipped when the matching var is set.
@@ -143,6 +146,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
     "max_recur_limit": 100,
+    # Run the independent first-layer analysts concurrently. The serial path
+    # remains available through the settings page and environment override.
+    "parallel_initial_analysts": True,
+    "parallel_initial_analyst_workers": 4,
     # News / data fetching parameters
     # Increase for longer lookback strategies or to broaden macro coverage;
     # decrease to reduce token usage in agent prompts.
@@ -160,6 +167,9 @@ DEFAULT_CONFIG = _apply_env_overrides({
     ],
     # China-market data sources (no API key required)
     "cn_data_enabled": True,
+    # Preserve the original Yahoo Finance market-data path by default.
+    # Set to "eastmoney" to prefer East Money for CN A/H OHLCV and indicators.
+    "cn_market_data_source": "yfinance",
     "cn_adr_tickers": [
         "BABA", "JD", "PDD", "BIDU", "NIO", "XPEV", "LI", "BILI", "TME", "VIPS",
         "WB", "YUMC", "ZTO", "BEKE", "FUTU", "TAL", "EDU", "NTES", "TCOM",
@@ -209,8 +219,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # routed to vendors you didn't choose. For ordered fallback, list several,
     # e.g. "yfinance,alpha_vantage". "default" uses all available vendors.
     "data_vendors": {
-        "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
-        "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
+        "core_stock_apis": "yfinance",       # Options: eastmoney (CN), alpha_vantage, yfinance
+        "technical_indicators": "yfinance",  # Options: eastmoney (CN), alpha_vantage, yfinance
         "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
         "news_data": "yfinance",             # Options: alpha_vantage, yfinance
         "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)

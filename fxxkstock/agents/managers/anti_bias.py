@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from fxxkstock.agents.schemas import (
@@ -10,9 +11,9 @@ from fxxkstock.agents.schemas import (
     FalsificationAudit,
     ResearchabilityAssessment,
     ResearchPlan,
-    render_falsification_audit,
     normalize_evidence_ledger,
     render_evidence_ledger,
+    render_falsification_audit,
     render_research_plan,
     render_researchability,
 )
@@ -218,28 +219,104 @@ Write every explanatory audit field in the configured report language. Keep
 only boolean and schema enum values in their required machine-readable form.
 {get_language_instruction()}"""
 
+        diagnostics: dict[str, Any] = {
+            "agent": "Falsification Auditor",
+            "input_characters": {
+                "prompt": len(prompt),
+                "instrument_context": len(instrument),
+                "researchability": len(researchability),
+                "evidence_ledger": len(evidence_ledger),
+                "market_report": len(state.get("market_report", "")),
+                "sentiment_report": len(state.get("sentiment_report", "")),
+                "news_report": len(state.get("news_report", "")),
+                "fundamentals_report": len(state.get("fundamentals_report", "")),
+                "debate_history": len(
+                    state.get("investment_debate_state", {}).get("history", "")
+                ),
+                "initial_plan": len(initial_plan),
+            },
+            "structured_available": structured_llm is not None,
+            "structured_attempts": 0,
+            "fallback_attempts": 0,
+            "fallback_used": False,
+        }
+        model_started_at = time.perf_counter()
+
         if structured_llm is not None:
+            structured_started_at = time.perf_counter()
+            diagnostics["structured_attempts"] = 1
             try:
                 audit = structured_llm.invoke(prompt)
                 if audit is None:
                     raise ValueError("structured output returned no result")
                 if audit.critical_findings:
                     audit.requires_revision = True
+                markdown = render_falsification_audit(audit)
+                diagnostics.update(
+                    {
+                        "structured_success": True,
+                        "structured_duration_seconds": round(
+                            time.perf_counter() - structured_started_at,
+                            3,
+                        ),
+                        "model_attempts": 1,
+                        "output_characters": len(markdown),
+                        "total_model_duration_seconds": round(
+                            time.perf_counter() - model_started_at,
+                            3,
+                        ),
+                    }
+                )
                 return {
                     "initial_investment_plan": initial_plan,
-                    "falsification_audit": _model_payload(
-                        audit, render_falsification_audit(audit)
-                    ),
+                    "falsification_audit": _model_payload(audit, markdown),
+                    "falsification_auditor_diagnostics": diagnostics,
                 }
             except Exception as exc:
+                diagnostics.update(
+                    {
+                        "structured_success": False,
+                        "structured_duration_seconds": round(
+                            time.perf_counter() - structured_started_at,
+                            3,
+                        ),
+                        "fallback_reason": type(exc).__name__,
+                        "fallback_error": str(exc).replace("\n", " ")[:240],
+                    }
+                )
                 logger.warning("Falsification structured output failed: %s", exc)
+        else:
+            diagnostics.update(
+                {
+                    "structured_success": False,
+                    "structured_duration_seconds": 0.0,
+                    "fallback_reason": "structured_output_unavailable",
+                }
+            )
 
+        fallback_started_at = time.perf_counter()
+        diagnostics["fallback_attempts"] = 1
+        diagnostics["fallback_used"] = True
         response = llm.invoke(
             prompt
             + "\n\nStructured output is unavailable. Write a concise free-text "
             "audit. It will be advisory and cannot trigger automatic revision."
         )
         text = str(getattr(response, "content", response)).strip()
+        diagnostics.update(
+            {
+                "fallback_duration_seconds": round(
+                    time.perf_counter() - fallback_started_at,
+                    3,
+                ),
+                "model_attempts": int(diagnostics["structured_attempts"]) + 1,
+                "output_characters": len(text),
+                "total_model_duration_seconds": round(
+                    time.perf_counter() - model_started_at,
+                    3,
+                ),
+            }
+        )
         return {
             "initial_investment_plan": initial_plan,
             "falsification_audit": {
@@ -252,6 +329,7 @@ only boolean and schema enum values in their required machine-readable form.
                     f"{text}"
                 ),
             },
+            "falsification_auditor_diagnostics": diagnostics,
         }
 
     return falsification_node

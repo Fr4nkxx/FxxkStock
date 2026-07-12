@@ -26,6 +26,8 @@ def test_no_env_uses_built_in_defaults(monkeypatch):
     assert dc.DEFAULT_CONFIG["backend_url"] is None
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is False
+    assert dc.DEFAULT_CONFIG["cn_market_data_source"] == "yfinance"
+    assert dc.DEFAULT_CONFIG["parallel_initial_analysts"] is True
 
 
 def test_string_overrides(monkeypatch):
@@ -79,6 +81,24 @@ def test_reasoning_thinking_overrides(monkeypatch):
     assert dc.DEFAULT_CONFIG["openai_reasoning_effort"] == "high"
     assert dc.DEFAULT_CONFIG["google_thinking_level"] == "minimal"
     assert dc.DEFAULT_CONFIG["anthropic_effort"] == "low"
+
+
+def test_cn_market_data_source_override(monkeypatch):
+    dc = _reload_with_env(
+        monkeypatch,
+        FXXKSTOCK_CN_MARKET_DATA_SOURCE="eastmoney",
+    )
+    assert dc.DEFAULT_CONFIG["cn_market_data_source"] == "eastmoney"
+
+
+def test_parallel_initial_analyst_overrides(monkeypatch):
+    dc = _reload_with_env(
+        monkeypatch,
+        FXXKSTOCK_PARALLEL_INITIAL_ANALYSTS="false",
+        FXXKSTOCK_PARALLEL_INITIAL_ANALYST_WORKERS="2",
+    )
+    assert dc.DEFAULT_CONFIG["parallel_initial_analysts"] is False
+    assert dc.DEFAULT_CONFIG["parallel_initial_analyst_workers"] == 2
 
 
 def test_reasoning_effort_defaults_to_none(monkeypatch):

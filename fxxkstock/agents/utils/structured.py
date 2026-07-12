@@ -19,6 +19,7 @@ all three agents log the same warnings when fallback fires.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -52,6 +53,7 @@ def invoke_structured_or_freetext(
     prompt: Any,
     render: Callable[[T], str],
     agent_name: str,
+    diagnostics: dict[str, Any] | None = None,
 ) -> str:
     """Run the structured call and render to markdown; fall back to free-text on any failure.
 
@@ -60,7 +62,22 @@ def invoke_structured_or_freetext(
     shape). The same value is forwarded to the free-text path so the
     fallback sees the same input the structured call did.
     """
+    started_at = time.perf_counter()
+    if diagnostics is not None:
+        diagnostics.update(
+            {
+                "agent": agent_name,
+                "structured_available": structured_llm is not None,
+                "structured_attempts": 0,
+                "fallback_attempts": 0,
+                "fallback_used": False,
+            }
+        )
+
     if structured_llm is not None:
+        structured_started_at = time.perf_counter()
+        if diagnostics is not None:
+            diagnostics["structured_attempts"] = 1
         try:
             result = structured_llm.invoke(prompt)
             if result is None:
@@ -68,12 +85,69 @@ def invoke_structured_or_freetext(
                 # the tool, leaving the parser with nothing to return. Treat it
                 # as a structured miss and fall back, with a clear reason.
                 raise ValueError("structured output returned no parsed result")
-            return render(result)
+            output = render(result)
+            if diagnostics is not None:
+                diagnostics.update(
+                    {
+                        "structured_success": True,
+                        "structured_duration_seconds": round(
+                            time.perf_counter() - structured_started_at,
+                            3,
+                        ),
+                        "model_attempts": 1,
+                        "output_characters": len(output),
+                        "total_model_duration_seconds": round(
+                            time.perf_counter() - started_at,
+                            3,
+                        ),
+                    }
+                )
+            return output
         except Exception as exc:
+            if diagnostics is not None:
+                diagnostics.update(
+                    {
+                        "structured_success": False,
+                        "structured_duration_seconds": round(
+                            time.perf_counter() - structured_started_at,
+                            3,
+                        ),
+                        "fallback_reason": type(exc).__name__,
+                        "fallback_error": str(exc).replace("\n", " ")[:240],
+                    }
+                )
             logger.warning(
                 "%s: structured-output invocation failed (%s); retrying once as free text",
                 agent_name, exc,
             )
+    elif diagnostics is not None:
+        diagnostics.update(
+            {
+                "structured_success": False,
+                "structured_duration_seconds": 0.0,
+                "fallback_reason": "structured_output_unavailable",
+            }
+        )
 
+    fallback_started_at = time.perf_counter()
+    if diagnostics is not None:
+        diagnostics["fallback_attempts"] = 1
+        diagnostics["fallback_used"] = True
     response = plain_llm.invoke(prompt)
-    return response.content
+    output = response.content
+    if diagnostics is not None:
+        diagnostics.update(
+            {
+                "fallback_duration_seconds": round(
+                    time.perf_counter() - fallback_started_at,
+                    3,
+                ),
+                "model_attempts": int(diagnostics["structured_attempts"]) + 1,
+                "output_characters": len(str(output)),
+                "total_model_duration_seconds": round(
+                    time.perf_counter() - started_at,
+                    3,
+                ),
+            }
+        )
+    return output

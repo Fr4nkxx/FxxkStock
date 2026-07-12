@@ -32,6 +32,8 @@ GENERAL_ENV_MAP: dict[str, str] = {
     "output_language": "FXXKSTOCK_OUTPUT_LANGUAGE",
     "web_research_depth": "FXXKSTOCK_WEB_RESEARCH_DEPTH",
     "web_analysis_mode": "FXXKSTOCK_WEB_ANALYSIS_MODE",
+    "parallel_initial_analysts": "FXXKSTOCK_PARALLEL_INITIAL_ANALYSTS",
+    "cn_market_data_source": "FXXKSTOCK_CN_MARKET_DATA_SOURCE",
     "news_article_limit": "FXXKSTOCK_NEWS_ARTICLE_LIMIT",
     "global_news_article_limit": "FXXKSTOCK_GLOBAL_NEWS_LIMIT",
     "cn_guba_post_limit": "FXXKSTOCK_CN_GUBA_POST_LIMIT",

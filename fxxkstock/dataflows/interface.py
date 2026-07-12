@@ -11,21 +11,24 @@ from .alpha_vantage import (
     get_news as get_alpha_vantage_news,
     get_stock as get_alpha_vantage_stock,
 )
+from .cninfo import get_cninfo_insider
 from .config import get_config
+from .eastmoney_browser import (
+    get_browser_global_news,
+    get_browser_insider,
+    get_browser_news,
+)
+from .eastmoney_market import (
+    get_eastmoney_indicators_window,
+    get_eastmoney_stock_data,
+)
+from .eastmoney_news import get_eastmoney_global_news, get_eastmoney_news
 from .errors import (
     BrowserUnavailableError,
     NoMarketDataError,
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
-from .eastmoney_news import get_eastmoney_global_news, get_eastmoney_news
-from .eastmoney_browser import (
-    fetch_browser_guba,
-    get_browser_global_news,
-    get_browser_insider,
-    get_browser_news,
-)
-from .cninfo import get_cninfo_insider
 from .fred import get_macro_data as get_fred_macro_data
 from .market_utils import is_cn_region
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
@@ -106,20 +109,25 @@ OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets"}
 
 # CN 区域时 prepend 到 vendor 链首的国内源（browser 为主，HTTP 为 fallback）
 _CN_REGION_VENDORS: dict[str, list[str]] = {
+    "get_stock_data": ["eastmoney"],
+    "get_indicators": ["eastmoney"],
     "get_news": ["browser", "eastmoney"],
     "get_global_news": ["browser", "eastmoney"],
     "get_insider_transactions": ["browser", "cninfo"],
 }
+_CN_MARKET_DATA_METHODS = {"get_stock_data", "get_indicators"}
 
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
     # core_stock_apis
     "get_stock_data": {
+        "eastmoney": get_eastmoney_stock_data,
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
     },
     # technical_indicators
     "get_indicators": {
+        "eastmoney": get_eastmoney_indicators_window,
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
     },
@@ -205,8 +213,16 @@ def _build_vendor_chain(method: str, explicit: list[str], all_available: list[st
     if not config.get("cn_data_enabled", True) or not is_cn_region(region):
         return base
 
+    cn_vendor_candidates = _CN_REGION_VENDORS.get(method, [])
+    if (
+        method in _CN_MARKET_DATA_METHODS
+        and str(config.get("cn_market_data_source", "yfinance")).strip().lower()
+        != "eastmoney"
+    ):
+        cn_vendor_candidates = []
+
     cn_vendors = [
-        v for v in _CN_REGION_VENDORS.get(method, [])
+        v for v in cn_vendor_candidates
         if v in VENDOR_METHODS[method]
     ]
     if not config.get("cn_browser_enabled", True):

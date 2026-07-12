@@ -21,6 +21,14 @@ logger = logging.getLogger(__name__)
 MAX_OHLCV_STALE_DAYS = 10
 
 
+def _cn_market_data_prefers_eastmoney(config: dict | None = None) -> bool:
+    config = config or get_config()
+    return (
+        str(config.get("cn_market_data_source", "yfinance")).strip().lower()
+        == "eastmoney"
+    )
+
+
 def yf_retry(func, max_retries=3, base_delay=2.0):
     """Execute a yfinance call with exponential backoff on rate limits.
 
@@ -125,6 +133,42 @@ def _assert_ohlcv_not_stale(
         )
 
 
+def _load_cn_ohlcv_fallback(symbol: str, curr_date: str) -> pd.DataFrame | None:
+    config = get_config()
+    if not config.get("cn_data_enabled", True) or not _cn_market_data_prefers_eastmoney(config):
+        return None
+    try:
+        from .eastmoney_market import load_eastmoney_ohlcv
+        from .market_utils import detect_market_region, is_cn_region
+
+        configured_region = config.get("market_region", "default")
+        detected_region = detect_market_region(symbol)
+        region = detected_region if is_cn_region(detected_region) else configured_region
+        if region not in {"cn_a", "cn_hk"}:
+            return None
+        return load_eastmoney_ohlcv(symbol, curr_date)
+    except NoMarketDataError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("CN OHLCV fallback failed for %s: %s", symbol, exc)
+        return None
+
+
+def _prefer_cn_ohlcv(symbol: str) -> bool:
+    config = get_config()
+    if not config.get("cn_data_enabled", True) or not _cn_market_data_prefers_eastmoney(config):
+        return False
+    try:
+        from .market_utils import detect_market_region, is_cn_region
+
+        configured_region = config.get("market_region", "default")
+        detected_region = detect_market_region(symbol)
+        region = detected_region if is_cn_region(detected_region) else configured_region
+        return region in {"cn_a", "cn_hk"}
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
@@ -160,28 +204,49 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     # transient rate limit). Treat an empty/columnless cache as a miss and
     # re-fetch rather than serving the poisoned file forever.
     data = None
-    if os.path.exists(data_file):
+    if _prefer_cn_ohlcv(symbol):
+        try:
+            data = _load_cn_ohlcv_fallback(symbol, curr_date)
+        except NoMarketDataError as exc:
+            logger.warning(
+                "Eastmoney OHLCV unavailable for %s; trying Yahoo Finance: %s",
+                symbol,
+                exc,
+            )
+            data = None
+
+    if data is None and os.path.exists(data_file):
         cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
         if not cached.empty and "Close" in cached.columns:
             data = cached
 
     if data is None:
-        downloaded = yf_retry(lambda: yf.download(
-            canonical,
-            start=start_str,
-            end=end_str,
-            multi_level_index=False,
-            progress=False,
-            auto_adjust=True,
-        ))
-        downloaded = _ensure_date_column(downloaded.reset_index())
-        # Only cache real data — never persist an empty frame.
-        if downloaded.empty or "Close" not in downloaded.columns:
-            raise NoMarketDataError(
-                symbol, canonical, "Yahoo Finance returned no rows"
+        try:
+            downloaded = yf_retry(lambda: yf.download(
+                canonical,
+                start=start_str,
+                end=end_str,
+                multi_level_index=False,
+                progress=False,
+                auto_adjust=True,
+            ))
+            downloaded = _ensure_date_column(downloaded.reset_index())
+            # Only cache real data — never persist an empty frame.
+            if downloaded.empty or "Close" not in downloaded.columns:
+                raise NoMarketDataError(
+                    symbol, canonical, "Yahoo Finance returned no rows"
+                )
+            downloaded.to_csv(data_file, index=False, encoding="utf-8")
+            data = downloaded
+        except NoMarketDataError:
+            fallback = _load_cn_ohlcv_fallback(symbol, curr_date)
+            if fallback is None:
+                raise
+            logger.warning(
+                "Yahoo Finance OHLCV unavailable for %s; falling back to Eastmoney.",
+                symbol,
             )
-        downloaded.to_csv(data_file, index=False, encoding="utf-8")
-        data = downloaded
+            data = fallback
 
     data = _clean_dataframe(data)
 

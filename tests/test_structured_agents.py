@@ -15,9 +15,9 @@ from pydantic import ValidationError
 from fxxkstock.agents.analysts.sentiment_analyst import create_sentiment_analyst
 from fxxkstock.agents.managers.research_manager import create_research_manager
 from fxxkstock.agents.schemas import (
+    ConfidenceLevel,
     PortfolioDecision,
     PortfolioRating,
-    ConfidenceLevel,
     ResearchPlan,
     SentimentBand,
     SentimentReport,
@@ -171,11 +171,22 @@ def test_invoke_structured_falls_back_when_result_is_none():
     plain = MagicMock()
     plain.invoke.return_value = MagicMock(content="FREETEXT")
 
+    diagnostics = {}
     out = invoke_structured_or_freetext(
-        structured, plain, "prompt", render=lambda r: r.rating, agent_name="t"
+        structured,
+        plain,
+        "prompt",
+        render=lambda r: r.rating,
+        agent_name="t",
+        diagnostics=diagnostics,
     )
     assert out == "FREETEXT"
     plain.invoke.assert_called_once()
+    assert diagnostics["structured_attempts"] == 1
+    assert diagnostics["fallback_attempts"] == 1
+    assert diagnostics["model_attempts"] == 2
+    assert diagnostics["fallback_used"] is True
+    assert diagnostics["fallback_reason"] == "ValueError"
 
 
 @pytest.mark.unit
@@ -294,6 +305,12 @@ class TestResearchManagerAgent:
         assert "**Recommendation**: Overweight" in ip
         assert "**Rationale**: Bull case" in ip
         assert "**Strategic Actions**: Build position" in ip
+        diagnostics = result["research_manager_diagnostics"]
+        assert diagnostics["structured_success"] is True
+        assert diagnostics["model_attempts"] == 1
+        assert diagnostics["fallback_used"] is False
+        assert diagnostics["input_characters"]["prompt"] > 0
+        assert diagnostics["output_characters"] == len(ip)
 
     def test_prompt_uses_5_tier_rating_scale(self):
         """The RM prompt must list all five tiers so the schema enum matches user expectations."""
@@ -313,6 +330,10 @@ class TestResearchManagerAgent:
         rm = create_research_manager(llm)
         result = rm(_make_rm_state())
         assert result["investment_plan"] == plain_response
+        diagnostics = result["research_manager_diagnostics"]
+        assert diagnostics["structured_available"] is False
+        assert diagnostics["fallback_used"] is True
+        assert diagnostics["fallback_reason"] == "structured_output_unavailable"
 
 
 # ---------------------------------------------------------------------------

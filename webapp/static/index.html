@@ -1161,6 +1161,7 @@
     const ACTIVE_RUNS_KEY = "fxxkstock.activeRuns";
     const SELECTED_TICKER_KEY = "fxxkstock.selectedTicker";
     const WATCHLIST_KEY = "fxxkstock.watchlist.v1";
+    const RUN_LOGS_KEY = "fxxkstock.runLogs.v1";
     const STAGE_DEFS = [
       ["market", "Market", "行情"],
       ["fundamentals", "Fundamental", "基本面"],
@@ -1174,6 +1175,7 @@
     let stockGroups = [];
     let watchlist = readJson(WATCHLIST_KEY, []);
     let activeRuns = readJson(ACTIVE_RUNS_KEY, {});
+    let runLogs = readJson(RUN_LOGS_KEY, {});
     let selectedTicker = null;
     let selectedReportId = null;
     let selectedMode = "simple";
@@ -1291,10 +1293,44 @@
     }
     function openModal(id) { $(id).classList.add("open"); }
     function closeModal(id) { $(id).classList.remove("open"); }
+    function eventTimestamp(item) {
+      if (item.ts) return item.ts;
+      if (item.emitted_at) return new Date(item.emitted_at).toLocaleTimeString();
+      return "--:--:--";
+    }
+    function renderEventLog() {
+      $("debugLog").textContent = eventLog.map((item) =>
+        `[${eventTimestamp(item)}] ${item.type || "event"} ${item.message || item.label || item.section || ""}`
+      ).join("\n") || "暂无运行日志";
+    }
     function logEvent(data) {
       eventLog.push({ ts: new Date().toLocaleTimeString(), ...data });
       eventLog = eventLog.slice(-220);
-      $("debugLog").textContent = eventLog.map((item) => `[${item.ts}] ${item.type || "event"} ${item.message || item.label || item.section || ""}`).join("\n") || "暂无运行日志";
+      renderEventLog();
+    }
+    function saveRunLogs() {
+      localStorage.setItem(RUN_LOGS_KEY, JSON.stringify(runLogs));
+    }
+    async function loadRunLog(runId = currentRunId) {
+      const url = runId
+        ? `/api/runs/${encodeURIComponent(runId)}/debug-log`
+        : selectedTicker
+          ? `/api/runs/debug-log/latest?ticker=${encodeURIComponent(selectedTicker)}`
+          : "";
+      if (!url) {
+        renderEventLog();
+        return;
+      }
+      const response = await fetch(url);
+      if (!response.ok) {
+        renderEventLog();
+        return;
+      }
+      const data = await response.json();
+      if (Array.isArray(data.events) && data.events.length) {
+        eventLog = data.events.slice(-220);
+      }
+      renderEventLog();
     }
     function saveActiveRuns() {
       localStorage.setItem(ACTIVE_RUNS_KEY, JSON.stringify(activeRuns));
@@ -1494,18 +1530,62 @@
       values.forEach((value, index) => index ? ctx.lineTo(x(index), y(value)) : ctx.moveTo(x(index), y(value)));
       ctx.strokeStyle = color; ctx.lineWidth = 1.8; ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.stroke();
     }
+    function baseOverview(ticker, range = "1d") {
+      return {
+        ticker,
+        name: ticker,
+        chart_range: range,
+        chart: [],
+        quote: {},
+        reports: [],
+      };
+    }
+    function mergeOverviewPart(ticker, patch = {}) {
+      if (selectedTicker !== ticker) return;
+      const previous = currentOverview && currentOverview.ticker === ticker
+        ? currentOverview
+        : baseOverview(ticker, patch.chart_range || "1d");
+      currentOverview = {
+        ...previous,
+        ...patch,
+        quote: patch.quote ? { ...(previous.quote || {}), ...patch.quote } : (previous.quote || {}),
+        chart: Array.isArray(patch.chart) ? patch.chart : (previous.chart || []),
+        reports: Array.isArray(patch.reports) ? patch.reports : (previous.reports || []),
+      };
+      renderOverview(currentOverview);
+    }
+    async function fetchJson(url) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`请求失败 (${response.status})`);
+      return response.json();
+    }
     async function loadOverview(range = "1d") {
       if (!selectedTicker) return;
       const ticker = selectedTicker;
-      const response = await fetch(`/api/stocks/${encodeURIComponent(ticker)}/overview?range=${range}`);
-      if (!response.ok) return;
-      const overview = await response.json();
-      if (selectedTicker === ticker) renderOverview(overview);
+      mergeOverviewPart(ticker, { ...baseOverview(ticker, range), chart_range: range, chart: [] });
+      $("chartEmpty").textContent = "行情图表加载中...";
+      const encoded = encodeURIComponent(ticker);
+      const quotePromise = fetchJson(`/api/stocks/${encoded}/quote`)
+        .then((data) => mergeOverviewPart(ticker, data))
+        .catch(() => {});
+      const reportsPromise = fetchJson(`/api/stocks/${encoded}/reports?limit=1000`)
+        .then((data) => mergeOverviewPart(ticker, { reports: data.reports || [] }))
+        .catch(() => {});
+      const chartPromise = fetchJson(`/api/stocks/${encoded}/chart?range=${range}`)
+        .then((data) => {
+          $("chartEmpty").textContent = "暂无价格序列";
+          mergeOverviewPart(ticker, data);
+        })
+        .catch(() => { if (selectedTicker === ticker) $("chartEmpty").textContent = "行情图表暂不可用"; });
+      await Promise.allSettled([quotePromise, reportsPromise]);
     }
     async function selectStock(ticker) {
       if (eventSource) { eventSource.close(); eventSource = null; }
       selectedTicker = String(ticker || "").toUpperCase();
       localStorage.setItem(SELECTED_TICKER_KEY, selectedTicker);
+      currentRunId = activeRuns[selectedTicker]?.runId || runLogs[selectedTicker] || null;
+      eventLog = [];
+      renderEventLog();
       renderStockList();
       renderPinState();
       $("ticker").value = selectedTicker;
@@ -1870,6 +1950,8 @@
     }
     async function completeRun(run) {
       clearInterval(elapsedTimer);
+      runLogs[run.ticker] = run.runId;
+      saveRunLogs();
       delete activeRuns[run.ticker];
       saveActiveRuns();
       eventSource?.close(); eventSource = null;
@@ -2061,6 +2143,8 @@
         clearInterval(elapsedTimer); $("runBtn").disabled = false; return;
       }
       currentRunId = (await response.json()).run_id;
+      runLogs[selectedTicker] = currentRunId;
+      saveRunLogs();
       const run = {
         runId: currentRunId,
         ticker: selectedTicker,
@@ -2112,7 +2196,10 @@
     $("pinTickerBtn").addEventListener("click", togglePinned);
     $("themeToggle").addEventListener("click", toggleTheme);
     $("settingsBtn").addEventListener("click", () => { window.location.href = "/settings"; });
-    $("debugBtn").addEventListener("click", () => openModal("debugModal"));
+    $("debugBtn").addEventListener("click", async () => {
+      await loadRunLog(currentRunId || (selectedTicker && runLogs[selectedTicker]));
+      openModal("debugModal");
+    });
     $("versionsBtn").addEventListener("click", () => renderReportTab("history"));
     $("exportBtn").addEventListener("click", exportReport);
     $("runBtn").addEventListener("click", startRun);

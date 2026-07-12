@@ -101,3 +101,19 @@ class AgentState(MessagesState):
     position_context: Annotated[
         dict[str, Any], "Optional per-run account position for decision agents"
     ]
+    parallel_initial_analyst_timings: Annotated[
+        list[dict[str, Any]],
+        "Observed wall-clock timings for experimental parallel initial analysts",
+    ]
+    parallel_initial_analysts_total_seconds: Annotated[
+        float,
+        "Observed total wall-clock time for the experimental parallel initial analyst node",
+    ]
+    research_manager_diagnostics: Annotated[
+        dict[str, Any],
+        "Non-content model-call diagnostics for the Research Manager",
+    ]
+    falsification_auditor_diagnostics: Annotated[
+        dict[str, Any],
+        "Non-content model-call diagnostics for the Falsification Auditor",
+    ]

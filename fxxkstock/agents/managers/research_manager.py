@@ -63,12 +63,24 @@ Calibrate certainty to the assessment, but do not treat sparse information as
 automatic bearish evidence. Explicitly distinguish conclusions both sides
 reached independently from consensus or concessions formed after cross-examination.""" + get_report_instructions()
 
+        diagnostics = {
+            "input_characters": {
+                "prompt": len(prompt),
+                "instrument_context": len(instrument_context),
+                "debate_history": len(history),
+                "blind_bull": len(blind_bull),
+                "blind_bear": len(blind_bear),
+                "evidence_ledger": len(evidence_ledger),
+                "researchability": len(researchability),
+            }
+        }
         investment_plan = invoke_structured_or_freetext(
             structured_llm,
             llm,
             prompt,
             render_research_plan,
             "Research Manager",
+            diagnostics=diagnostics,
         )
 
         new_investment_debate_state = {
@@ -83,6 +95,7 @@ reached independently from consensus or concessions formed after cross-examinati
         return {
             "investment_debate_state": new_investment_debate_state,
             "investment_plan": investment_plan,
+            "research_manager_diagnostics": diagnostics,
         }
 
     return research_manager_node

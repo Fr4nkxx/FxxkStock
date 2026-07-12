@@ -13,22 +13,32 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from fxxkstock.llm_clients.model_catalog import MODEL_OPTIONS
-from fxxkstock.agents.utils.ticker_memory import TickerMemoryStore
 from fxxkstock.agents.utils.calibration import CalibrationStore
 from fxxkstock.agents.utils.position import PositionContext
-from fxxkstock.default_config import DEFAULT_CONFIG
+from fxxkstock.agents.utils.ticker_memory import TickerMemoryStore
 from fxxkstock.dataflows.chrome_manager import ChromeManager
+from fxxkstock.default_config import DEFAULT_CONFIG
+from fxxkstock.llm_clients.model_catalog import MODEL_OPTIONS
 
 from .history import (
     get_historical_report,
+    get_stock_chart,
     get_stock_overview,
+    get_stock_quote,
+    get_stock_reports,
     list_historical_reports,
     read_audit_metadata,
-    read_report_sections,
     read_core_insights,
+    read_report_sections,
 )
-from .runner import RunParams, RunState, build_run_config, start_run
+from .runner import (
+    RunParams,
+    RunState,
+    build_run_config,
+    read_latest_run_debug_log,
+    read_run_debug_log,
+    start_run,
+)
 from .settings_store import (
     delete_api_key,
     get_api_key_status,
@@ -72,6 +82,10 @@ class GeneralSettingsRequest(BaseModel):
         default="simple", pattern="^(simple|medium|complex)$"
     )
     web_analysis_mode: str = Field(default="auto", pattern="^(auto|full)$")
+    parallel_initial_analysts: bool = True
+    cn_market_data_source: str = Field(
+        default="yfinance", pattern="^(yfinance|eastmoney)$"
+    )
     news_article_limit: int = Field(default=20, ge=1, le=100)
     global_news_article_limit: int = Field(default=10, ge=1, le=100)
     cn_guba_post_limit: int = Field(default=15, ge=1, le=100)
@@ -222,6 +236,24 @@ def get_report(run_id: str) -> dict[str, Any]:
         "decision": state.decision,
         "report_dir": str(state.report_path),
     }
+
+
+@app.get("/api/runs/{run_id}/debug-log")
+def get_run_debug_log(run_id: str, request: Request) -> dict[str, Any]:
+    _require_local_request(request)
+    try:
+        return read_run_debug_log(run_id, RUNS.get(run_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/runs/debug-log/latest")
+def get_latest_run_debug_log(
+    request: Request,
+    ticker: str | None = None,
+) -> dict[str, Any]:
+    _require_local_request(request)
+    return read_latest_run_debug_log(ticker)
 
 
 @app.get("/api/runs/{run_id}")
@@ -398,6 +430,30 @@ def open_browser_login_site(site: str, request: Request) -> dict[str, Any]:
 def get_stock_overview_api(ticker: str, range: str = "1d") -> dict[str, Any]:
     try:
         return get_stock_overview(ticker, chart_range=range)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/stocks/{ticker}/quote")
+def get_stock_quote_api(ticker: str) -> dict[str, Any]:
+    try:
+        return get_stock_quote(ticker)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/stocks/{ticker}/chart")
+def get_stock_chart_api(ticker: str, range: str = "1d") -> dict[str, Any]:
+    try:
+        return get_stock_chart(ticker, chart_range=range)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/stocks/{ticker}/reports")
+def get_stock_reports_api(ticker: str, limit: int = 1000) -> dict[str, Any]:
+    try:
+        return {"reports": get_stock_reports(ticker, limit=limit)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

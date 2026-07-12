@@ -10,17 +10,15 @@ from fxxkstock.agents.managers.anti_bias import (
     create_researchability_assessor,
 )
 from fxxkstock.agents.schemas import (
-    ConfidenceLevel,
     FalsificationAudit,
-    InformationGrade,
     PortfolioRating,
     ResearchabilityAssessment,
     ResearchPlan,
     render_falsification_audit,
     render_researchability,
 )
-from fxxkstock.graph.conditional_logic import ConditionalLogic
 from fxxkstock.agents.utils.ticker_memory import TickerMemoryStore
+from fxxkstock.graph.conditional_logic import ConditionalLogic
 
 
 def _state():
@@ -85,6 +83,11 @@ def test_critical_falsification_finding_forces_single_revision_route():
     payload = result["falsification_audit"]
     assert payload["requires_revision"] is True
     assert result["initial_investment_plan"] == "**Recommendation**: Buy"
+    diagnostics = result["falsification_auditor_diagnostics"]
+    assert diagnostics["structured_success"] is True
+    assert diagnostics["model_attempts"] == 1
+    assert diagnostics["fallback_used"] is False
+    assert diagnostics["input_characters"]["prompt"] > 0
     assert (
         ConditionalLogic().should_revise_research(result)
         == "Research Manager Revision"
@@ -100,7 +103,29 @@ def test_unstructured_audit_is_advisory_and_does_not_auto_revise():
     result = create_falsification_auditor(llm)(_state())
     assert result["falsification_audit"]["status"] == "unavailable"
     assert result["falsification_audit"]["requires_revision"] is False
+    diagnostics = result["falsification_auditor_diagnostics"]
+    assert diagnostics["structured_available"] is False
+    assert diagnostics["fallback_used"] is True
+    assert diagnostics["fallback_reason"] == "structured_output_unavailable"
     assert ConditionalLogic().should_revise_research(result) == "Trader"
+
+
+@pytest.mark.unit
+def test_falsification_diagnostics_record_structured_failure_and_fallback():
+    structured = MagicMock()
+    structured.invoke.side_effect = ValueError("structured output returned no result")
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+    llm.invoke.return_value = MagicMock(content="Free-text challenge.")
+
+    result = create_falsification_auditor(llm)(_state())
+
+    diagnostics = result["falsification_auditor_diagnostics"]
+    assert diagnostics["structured_attempts"] == 1
+    assert diagnostics["fallback_attempts"] == 1
+    assert diagnostics["model_attempts"] == 2
+    assert diagnostics["fallback_used"] is True
+    assert diagnostics["fallback_reason"] == "ValueError"
 
 
 @pytest.mark.unit
