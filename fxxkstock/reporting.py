@@ -40,26 +40,25 @@ def render_account_position_section(position: dict | None) -> str:
 
     currency = context.get("currency") or ""
     currency_suffix = f" {currency}" if currency else ""
-    rows = [
-        ("持仓状态", "持有"),
-        (
+    rows = [("持仓状态", "持有")]
+    if context.get("quantity") is not None:
+        rows.append((
             "持股数量",
-            _format_position_number(
-                context["quantity"], 6, trim_trailing_zeros=True
-            ),
-        ),
+            _format_position_number(context["quantity"], 6, trim_trailing_zeros=True),
+        ))
+    rows.append(
         (
             "真实平均成本",
             f"{_format_position_number(context['average_cost'], 6, trim_trailing_zeros=True)}{currency_suffix}",
-        ),
-    ]
+        )
+    )
     if context.get("current_price") is not None:
-        rows.extend(
-            [
-                (
-                    "本次权威现价",
-                    f"{_format_position_number(context['current_price'], 6, trim_trailing_zeros=True)}{currency_suffix}",
-                ),
+        rows.append((
+            "本次权威现价",
+            f"{_format_position_number(context['current_price'], 6, trim_trailing_zeros=True)}{currency_suffix}",
+        ))
+        if context.get("market_value") is not None:
+            rows.extend([
                 (
                     "持仓成本",
                     f"{_format_position_number(context['cost_basis'])}{currency_suffix}",
@@ -72,12 +71,8 @@ def render_account_position_section(position: dict | None) -> str:
                     "浮动盈亏",
                     f"{_format_position_number(context['unrealized_pnl'])}{currency_suffix}",
                 ),
-                (
-                    "浮动收益率",
-                    f"{float(context['unrealized_return_pct']):.2f}%",
-                ),
-            ]
-        )
+            ])
+        rows.append(("浮动收益率", f"{float(context['unrealized_return_pct']):.2f}%"))
     else:
         rows.append(("行情估值", "现价不可用，未计算"))
     table = "\n".join(f"| {label} | {value} |" for label, value in rows)
@@ -279,6 +274,34 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
 
     decision_metadata = final_state.get("portfolio_decision_metadata") or {}
     if decision_metadata:
+        calendar_nodes = list(decision_metadata.get("review_nodes") or [])
+        if decision_metadata.get("execution_condition"):
+            calendar_nodes.append({
+                "node_type": "execution",
+                "trigger_type": "condition",
+                "condition": decision_metadata["execution_condition"],
+                "action": decision_metadata.get("next_action") or "Review execution",
+            })
+        if decision_metadata.get("risk_boundary"):
+            calendar_nodes.append({
+                "node_type": "risk",
+                "trigger_type": "condition",
+                "condition": decision_metadata["risk_boundary"],
+                "action": decision_metadata["risk_boundary"],
+            })
+        (save_path / "calendar_nodes.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "ticker": ticker,
+                    "analysis_date": final_state.get("trade_date"),
+                    "nodes": calendar_nodes,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         calibration_dir = save_path / "7_calibration"
         calibration_dir.mkdir(exist_ok=True)
         predictions = decision_metadata.get("predictions") or []

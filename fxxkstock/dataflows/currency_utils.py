@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import functools
 import logging
+from collections.abc import Mapping
 from datetime import datetime, timedelta
-from typing import Any, Mapping
+from typing import Any
 
 import pandas as pd
 import yfinance as yf

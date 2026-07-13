@@ -28,8 +28,8 @@ from fxxkstock.agents.utils.agent_utils import (
     get_verified_market_snapshot,
     resolve_instrument_identity,
 )
-from fxxkstock.agents.utils.memory import TradingMemoryLog
 from fxxkstock.agents.utils.calibration import CalibrationStore
+from fxxkstock.agents.utils.memory import TradingMemoryLog
 from fxxkstock.agents.utils.ticker_memory import TickerMemoryStore
 from fxxkstock.dataflows.config import get_config, set_config
 from fxxkstock.dataflows.market_data_validator import (
@@ -561,13 +561,14 @@ class FxxKStockGraph:
         decision = final_state.get("portfolio_decision_metadata") or {}
         if not decision:
             markdown = final_state.get("final_trade_decision", "")
-            field = lambda label: (
-                re.search(
+
+            def field(label: str):
+                return re.search(
                     rf"\*\*{re.escape(label)}\*\*:\s*([^\n]+)",
                     markdown,
                     re.IGNORECASE,
                 )
-            )
+
             rating_match = field("Rating")
             if rating_match:
                 decision = {
@@ -665,7 +666,8 @@ class FxxKStockGraph:
             save_path = (
                 Path(self.config["results_dir"])
                 / "reports"
-                / f"{safe_ticker_component(ticker)}_{stamp}"
+                / safe_ticker_component(ticker)
+                / stamp
             )
         return write_report_tree(final_state, ticker, save_path)
 

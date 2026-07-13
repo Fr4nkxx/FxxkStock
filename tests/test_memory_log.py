@@ -94,6 +94,15 @@ def _structured_pm_llm(captured: dict, decision: PortfolioDecision | None = None
             rating=PortfolioRating.HOLD,
             executive_summary="Hold the position; await catalyst.",
             investment_thesis="Balanced view; neither side carried the debate.",
+            next_action="Hold",
+            execution_condition="Maintain while support holds.",
+            risk_boundary="Reduce if support breaks.",
+            review_trigger="Review after the next filing.",
+            review_nodes=[{
+                "node_type": "review", "trigger_type": "event",
+                "calendar_date": None, "event": "Next filing",
+                "action": "Review the thesis.",
+            }],
             data_confidence="High",
             data_confidence_reason="Fresh evidence.",
             thesis_confidence="Medium",
@@ -733,6 +742,15 @@ class TestPortfolioManagerInjection:
             rating=PortfolioRating.OVERWEIGHT,
             executive_summary="Build position gradually over the next two weeks.",
             investment_thesis="AI capex cycle remains intact; institutional flows constructive.",
+            next_action="Add",
+            execution_condition="Add after a confirmed breakout.",
+            risk_boundary="Reduce if the breakout fails.",
+            review_trigger="Review in 5 trading days.",
+            review_nodes=[{
+                "node_type": "review", "trigger_type": "date",
+                "calendar_date": "2026-07-16", "event": None,
+                "action": "Review the breakout.",
+            }],
             price_target=215.0,
             time_horizon="3-6 months",
             data_confidence="High",
@@ -749,6 +767,11 @@ class TestPortfolioManagerInjection:
         assert "**Rating**: Overweight" in md
         assert "**Executive Summary**: Build position gradually" in md
         assert "**Investment Thesis**: AI capex cycle" in md
+        assert "**Next Action**: Add" in md
+        assert "**Execution Condition**: Add after a confirmed breakout." in md
+        assert "**Risk Boundary**: Reduce if the breakout fails." in md
+        assert "**Review Trigger**: Review in 5 trading days." in md
+        assert "- [date][review] 2026-07-16: Review the breakout." in md
         assert "**Price Target**: 215.0" in md
         assert "**Time Horizon**: 3-6 months" in md
         assert "**Data Confidence**: High" in md

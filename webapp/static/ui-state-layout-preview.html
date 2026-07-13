@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FxxKStock · 布局预览</title>
+  <style>
+    :root { --bg:#0b1018; --side:#0d141e; --panel:#121c29; --panel2:#101925; --line:#263547; --text:#e7eff8; --muted:#8999aa; --accent:#36a889; --accentsoft:#163f3a; --blue:#5ca9ff; --amber:#f3ad49; --red:#ef7474; }
+    * { box-sizing:border-box } body { margin:0; min-width:1120px; background:var(--bg); color:var(--text); font:13px Inter,"PingFang SC","Microsoft YaHei",sans-serif; }
+    .app { height:100vh; display:grid; grid-template-columns:304px 1fr; background:radial-gradient(circle at 80% 0,#142131 0,transparent 38%),var(--bg); }
+    .sidebar { padding:0 12px; background:rgba(13,20,30,.94); border-right:1px solid var(--line); }
+    .brand { height:61px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--line); font-size:17px; font-weight:750; } .mark{display:grid;place-items:center;width:25px;height:25px;background:#39a888;border-radius:6px;color:#09251f;font-size:15px}.brand small{margin-left:auto;color:var(--muted);font-size:10px;font-weight:500}
+    .new { width:100%; margin:12px 0 10px; height:36px; border:0; border-radius:6px; color:white; background:linear-gradient(135deg,#38a98c,#277b9c); font-weight:700; } .search{height:35px;padding:9px 11px;border:1px solid var(--line);border-radius:6px;color:#647589;background:#0c131e}.section{display:flex;justify-content:space-between;padding:17px 3px 8px;color:#8796a6;font-size:11px;font-weight:700}.section span:last-child{color:#607185;font-weight:500}
+    .stock { width:100%; min-height:85px; padding:10px; margin-bottom:7px; border:1px solid transparent; border-radius:8px; background:transparent; color:inherit; text-align:left; } .stock.selected{border-color:#347f74;background:#12342f}.line1,.line2,.line3{display:flex;align-items:center}.line1{gap:8px}.code{font-weight:800;letter-spacing:.25px}.badge{margin-left:auto;padding:3px 7px;border-radius:10px;font-size:11px;font-weight:700}.buy{color:#75d9be;background:#164b3d}.hold{color:#f3bb63;background:#4a381d}.wait{color:#86bdff;background:#173c61}.line2{margin-top:7px;color:#9cafbf}.line3{margin-top:9px;gap:8px;color:#9fc8ff;font-size:11px}.track{height:5px;flex:1;overflow:hidden;border-radius:4px;background:#263849}.fill{height:100%;border-radius:4px;background:linear-gradient(90deg,#3ea98d,#68b5ff)}
+    main{min-width:0}.topbar{height:61px;display:flex;align-items:center;padding:0 24px;border-bottom:1px solid var(--line)}.title{font-size:16px;font-weight:750}.title small{display:block;margin-top:4px;color:var(--muted);font-size:11px;font-weight:400}.theme-note{margin-left:auto;color:#718397;font-size:11px}.actions{display:flex;gap:9px;margin-left:14px}.btn{height:34px;padding:0 12px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:#b9c6d2}.btn.icon{width:34px;padding:0;font-size:16px}.btn.icon svg{width:16px;height:16px;vertical-align:middle;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.btn.primary{border:0;background:#349b81;color:#fff;font-weight:700}
+    .content{padding:22px 24px;display:grid;grid-template-columns:2fr 1fr;grid-template-rows:226px 212px minmax(250px,1fr);gap:14px}.panel{border:1px solid var(--line);border-radius:10px;background:linear-gradient(145deg,rgba(20,30,43,.96),rgba(15,24,35,.96));padding:16px}.reader{grid-column:span 2}.head{display:flex;justify-content:space-between;color:#aebdca;font-weight:700}.tag{color:#77d6bc;background:#164b3d;border-radius:12px;padding:3px 8px;font-size:11px}.rating{margin:22px 0 9px;font-size:34px;font-weight:800;color:#73d2b7}.summary{max-width:650px;color:#a9b8c5;line-height:1.6}.metrics{display:flex;gap:20px;margin-top:20px}.metric span{display:block;color:#78899b;font-size:11px}.metric b{display:block;margin-top:5px;font-size:14px}.list{margin:15px 0 0;padding:0;list-style:none}.list li{padding:9px 0;border-bottom:1px solid rgba(38,53,71,.65);color:#aab9c7}.list li:before{content:'•';color:#58aaff;margin-right:8px}.list li.warn:before{color:var(--amber)}
+    .chart{height:126px;margin-top:18px;border-radius:6px;background:linear-gradient(180deg,rgba(50,90,115,.18),transparent),repeating-linear-gradient(0deg,transparent 0 30px,rgba(64,86,105,.2) 31px)}.chart svg{width:100%;height:100%}.reader{display:grid;grid-template-columns:190px minmax(0,1fr);padding:0;overflow:hidden}.report-nav{padding:16px 12px;border-right:1px solid var(--line)}.report-nav .head{margin:0 4px 10px}.nav-item{display:flex;justify-content:space-between;width:100%;padding:9px 8px;border:0;border-radius:6px;background:transparent;color:#a9b8c7;text-align:left}.nav-item.active{color:#84d8c0;background:#153b35}.nav-item small{color:#6f8296}.report-body{padding:16px 20px}.report-body p{line-height:1.75;color:#aab9c7;max-width:1000px}.run-note{font-size:12px;color:#98aac0;margin-top:18px}.empty{height:100%;display:grid;place-items:center;color:#63768a}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="mark">↗</span>FxxKStock <small>Research Workbench</small></div>
+      <button class="new">＋ 新建分析</button><div class="search">⌕　搜索自选标的 / 历史报告</div>
+      <div class="section"><span>今日研究池</span><span>浏览器本地</span></div>
+      <button class="stock selected"><div class="line1"><span class="code">SZ300308</span><span class="badge wait">分析中</span></div><div class="line2">中际旭创</div><div class="line3"><div class="track"><div class="fill" style="width:62%"></div></div><span>62%</span></div></button>
+      <button class="stock"><div class="line1"><span class="code">SH600519</span><span class="badge buy">增持</span></div><div class="line2">贵州茅台</div></button>
+      <button class="stock"><div class="line1"><span class="code">SZ000858</span><span class="badge hold">观望</span></div><div class="line2">五粮液</div></button>
+    </aside>
+    <main><header class="topbar"><div class="title">中际旭创 <small>SZ300308 · 通信设备 · 正在分析</small></div><span class="theme-note">◐ 工作台 v1</span><div class="actions"><button class="btn icon" title="切换黑白主题">☾</button><button class="btn">☆ 加入自选</button><button class="btn primary">↻ 重新分析</button><button class="btn icon" title="查看运行日志" aria-label="查看运行日志"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="6" width="8" height="12" rx="4"></rect><path d="M9 2v4M15 2v4M9 18v4M15 18v4M20 8h-4M20 16h-4M4 8h4M4 16h4M11 10h2M11 14h2"></path></svg></button><button class="btn icon" title="设置">⚙</button></div></header>
+      <div class="content">
+        <article class="panel"><div class="head">今日结论 <span class="tag">分析进行中</span></div><div class="rating">等待最终结论</div><div class="summary">当前分析任务的状态不再占用主区卡片；进度已收进左侧对应股票卡片，完成后这里更新为最终评级与可执行建议。</div><div class="metrics"><div class="metric"><span>目标价</span><b>--</b></div><div class="metric"><span>时间范围</span><b>--</b></div><div class="metric"><span>数据置信度</span><b>--</b></div></div></article>
+        <article class="panel"><div class="head">相对上次变化 <span>--</span></div><ul class="list"><li>完成分析后显示评级与目标价变化</li><li>首次分析时展示关键新增证据</li></ul></article>
+        <article class="panel market"><div class="head">行情辅助判断 <span>2026-07-11</span></div><div class="chart"><svg viewBox="0 0 700 120" preserveAspectRatio="none"><polyline fill="none" stroke="#58b395" stroke-width="2.4" points="0,88 55,78 105,82 165,51 230,66 300,43 362,54 430,29 490,42 545,20 610,32 700,14"/></svg></div></article>
+        <article class="panel"><div class="head">下一步动作 <span class="tag">复盘行动</span></div><ul class="list"><li>观察成交量是否持续放大</li><li class="warn">等待报告生成后确认风险位</li></ul></article>
+        <article class="panel reader"><nav class="report-nav"><div class="head">研究目录</div><button class="nav-item active">执行摘要 <small>当前</small></button><button class="nav-item">投资逻辑</button><button class="nav-item">关键风险</button><button class="nav-item">证据依据</button><button class="nav-item">反偏见审计</button><button class="nav-item">历史版本</button></nav><div class="report-body"><div class="head">分析报告 <span>生成后自动更新</span></div><p>最下方的「1」保持原有阅读器：左侧是研究目录，右侧是报告内容。上方为两列两行：第一行「今日结论 / 相对上次变化」，第二行「行情辅助判断 / 下一步动作」。运行态已经移到侧边栏对应股票的第三行。</p></div></article>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -49,10 +49,22 @@ def test_held_position_computes_mark_to_market_values():
 
 
 @pytest.mark.unit
+def test_held_position_with_cost_only_tracks_return_without_position_size():
+    context = build_position_context(
+        {"status": "held", "average_cost": 8.0},
+        {"close": 10.0, "currency": "CNY"},
+    )
+
+    assert context["quantity"] is None
+    assert context["unrealized_return_pct"] == pytest.approx(25)
+    assert "market_value" not in context
+    assert "Quantity:" not in render_position_context(context)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "position",
     [
-        {"status": "held"},
         {"status": "held", "quantity": 0, "average_cost": 8},
         {"status": "held", "quantity": 100, "average_cost": 0},
         {"status": "held", "quantity": -1, "average_cost": 8},

@@ -28,12 +28,10 @@ class PositionContext(BaseModel):
 
     @model_validator(mode="after")
     def validate_held_values(self):
-        if self.status == "held" and (
-            not self.quantity or self.average_cost is None
-        ):
-            raise ValueError(
-                "held position requires quantity and average_cost greater than zero"
-            )
+        if self.status == "held" and self.average_cost is None:
+            raise ValueError("held position requires average_cost greater than zero")
+        if self.status == "held" and self.quantity is not None and self.quantity <= 0:
+            raise ValueError("held quantity must be greater than zero when provided")
         return self
 
 
@@ -60,21 +58,25 @@ def build_position_context(
         current_price = None
 
     if normalized.status == "held" and current_price is not None:
-        quantity = float(normalized.quantity)
         average_cost = float(normalized.average_cost)
-        cost_basis = quantity * average_cost
-        market_value = quantity * current_price
-        unrealized_pnl = market_value - cost_basis
         context.update(
             {
                 "current_price": current_price,
                 "currency": snapshot.get("currency"),
-                "cost_basis": cost_basis,
-                "market_value": market_value,
-                "unrealized_pnl": unrealized_pnl,
                 "unrealized_return_pct": (current_price / average_cost - 1) * 100,
             }
         )
+        if normalized.quantity:
+            quantity = float(normalized.quantity)
+            cost_basis = quantity * average_cost
+            market_value = quantity * current_price
+            context.update(
+                {
+                    "cost_basis": cost_basis,
+                    "market_value": market_value,
+                    "unrealized_pnl": market_value - cost_basis,
+                }
+            )
     return context
 
 
@@ -95,19 +97,21 @@ def render_position_context(position: dict[str, Any] | None) -> str:
 
     lines = [
         "Current account position: HELD.",
-        f"- Quantity: {context['quantity']}",
         f"- Average cost: {context['average_cost']}",
     ]
+    if context.get("quantity"):
+        lines.append(f"- Quantity: {context['quantity']}")
     if context.get("current_price") is not None:
         currency = f" {context['currency']}" if context.get("currency") else ""
-        lines.extend(
-            [
-                f"- Authoritative current price: {context['current_price']}{currency}",
-                f"- Current market value: {context['market_value']:.2f}{currency}",
-                f"- Unrealized P/L: {context['unrealized_pnl']:.2f}{currency}",
-                f"- Unrealized return: {context['unrealized_return_pct']:.2f}%",
-            ]
-        )
+        lines.append(f"- Authoritative current price: {context['current_price']}{currency}")
+        if context.get("market_value") is not None:
+            lines.extend(
+                [
+                    f"- Current market value: {context['market_value']:.2f}{currency}",
+                    f"- Unrealized P/L: {context['unrealized_pnl']:.2f}{currency}",
+                ]
+            )
+        lines.append(f"- Unrealized return: {context['unrealized_return_pct']:.2f}%")
     else:
         lines.append("- Current price unavailable; do not estimate market value or P/L.")
     lines.append(

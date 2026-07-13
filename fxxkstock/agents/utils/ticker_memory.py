@@ -251,11 +251,22 @@ class TickerMemoryStore:
     def _import_latest_report(self, ticker: str) -> dict[str, Any] | None:
         if not self.reports_dir.is_dir():
             return None
-        prefix = f"{safe_ticker_component(ticker.upper())}_"
-        candidates = [
+        safe_ticker = safe_ticker_component(ticker.upper())
+        prefix = f"{safe_ticker}_"
+        legacy_candidates = [
             path for path in self.reports_dir.iterdir()
             if path.is_dir() and path.name.startswith(prefix)
         ]
+        ticker_dir = self.reports_dir / safe_ticker
+        nested_candidates = (
+            [
+                path for path in ticker_dir.iterdir()
+                if path.is_dir() and re.fullmatch(r"\d{8}_\d{6}", path.name)
+            ]
+            if ticker_dir.is_dir()
+            else []
+        )
+        candidates = legacy_candidates + nested_candidates
         if not candidates:
             return None
         latest = max(candidates, key=lambda path: path.stat().st_mtime)
@@ -264,7 +275,11 @@ class TickerMemoryStore:
             file = latest / relative
             reports[key] = file.read_text(encoding="utf-8", errors="replace") if file.is_file() else ""
 
-        stamp = latest.name[len(prefix):]
+        stamp = (
+            latest.name[len(prefix):]
+            if latest.parent == self.reports_dir and latest.name.startswith(prefix)
+            else latest.name
+        )
         try:
             analysis_date = datetime.strptime(stamp, "%Y%m%d_%H%M%S").date().isoformat()
         except ValueError:

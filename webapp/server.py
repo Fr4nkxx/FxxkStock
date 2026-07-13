@@ -21,11 +21,14 @@ from fxxkstock.default_config import DEFAULT_CONFIG
 from fxxkstock.llm_clients.model_catalog import MODEL_OPTIONS
 
 from .history import (
+    delete_historical_report,
+    delete_stock_reports,
     get_historical_report,
     get_stock_chart,
     get_stock_overview,
     get_stock_quote,
     get_stock_reports,
+    list_calendar_nodes,
     list_historical_reports,
     read_audit_metadata,
     read_core_insights,
@@ -147,6 +150,14 @@ def settings_page() -> FileResponse:
     html_path = STATIC_DIR / "settings.html"
     if not html_path.is_file():
         raise HTTPException(status_code=404, detail="settings.html not found")
+    return FileResponse(html_path)
+
+
+@app.get("/calendar")
+def calendar_page() -> FileResponse:
+    html_path = STATIC_DIR / "calendar.html"
+    if not html_path.is_file():
+        raise HTTPException(status_code=404, detail="calendar.html not found")
     return FileResponse(html_path)
 
 
@@ -291,6 +302,26 @@ def get_run_status(run_id: str) -> dict[str, Any]:
 def list_report_history(limit: int = 100) -> dict[str, Any]:
     items = list_historical_reports(limit=limit)
     return {"reports": items}
+
+
+@app.delete("/api/stocks/{ticker}")
+def delete_stock(ticker: str, request: Request) -> dict[str, Any]:
+    _require_local_request(request)
+    if any(
+        state.ticker.upper() == ticker.strip().upper()
+        and state.status in {"queued", "running"}
+        for state in RUNS.values()
+    ):
+        raise HTTPException(status_code=409, detail="该股票正在分析，暂时不能删除")
+    try:
+        return delete_stock_reports(ticker)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/calendar/nodes")
+def get_calendar_nodes() -> dict[str, Any]:
+    return {"nodes": list_calendar_nodes()}
 
 
 @app.get("/api/memory/{ticker}")
@@ -458,10 +489,24 @@ def get_stock_reports_api(ticker: str, limit: int = 1000) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/api/reports/history/{report_id}")
+@app.get("/api/reports/history/{report_id:path}")
 def get_report_history_item(report_id: str) -> dict[str, Any]:
     try:
         return get_historical_report(report_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/reports/history/{report_id:path}")
+def delete_report_history_item(
+    report_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    _require_local_request(request)
+    try:
+        return delete_historical_report(report_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

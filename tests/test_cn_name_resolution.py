@@ -108,6 +108,71 @@ def test_get_security_cn_name_etf_uses_cached_chinese_name(tmp_path):
 
 
 @pytest.mark.unit
+def test_get_security_cn_name_etf_reuses_etf_metadata_cache(tmp_path):
+    cache = tmp_path / "security_names" / "cn_etfs.json"
+    cache.parent.mkdir(parents=True)
+    cache.write_text(
+        json.dumps({
+            "159516": {
+                "fund_name": "半导体设备ETF国泰",
+                "tracking_index": "中证半导体材料设备主题指数",
+            }
+        }),
+        encoding="utf-8",
+    )
+    with (
+        patch(
+            "fxxkstock.dataflows.market_utils._fetch_eastmoney_cn_name",
+            return_value=None,
+        ),
+        patch(
+            "fxxkstock.dataflows.market_utils._fetch_eastmoney_fund_cn_name"
+        ) as mock_fund,
+        patch(
+            "fxxkstock.dataflows.market_utils._fetch_eastmoney_etf_metadata"
+        ) as mock_profile,
+        patch(
+            "fxxkstock.dataflows.market_utils.get_config",
+            return_value={"data_cache_dir": str(tmp_path)},
+        ),
+    ):
+        name = get_security_cn_name("159516.SZ", "cn_a")
+
+    assert name == "半导体设备ETF国泰"
+    mock_fund.assert_not_called()
+    mock_profile.assert_not_called()
+
+
+@pytest.mark.unit
+def test_get_security_cn_name_etf_falls_back_to_profile(tmp_path):
+    with (
+        patch(
+            "fxxkstock.dataflows.market_utils._fetch_eastmoney_cn_name",
+            return_value=None,
+        ),
+        patch(
+            "fxxkstock.dataflows.market_utils._fetch_eastmoney_fund_cn_name",
+            return_value=None,
+        ),
+        patch(
+            "fxxkstock.dataflows.market_utils._fetch_eastmoney_etf_metadata",
+            return_value={"fund_name": "半导体设备ETF国泰", "tracking_index": None},
+        ),
+        patch(
+            "fxxkstock.dataflows.market_utils.get_config",
+            return_value={"data_cache_dir": str(tmp_path)},
+        ),
+    ):
+        name = get_security_cn_name("159516.SZ", "cn_a")
+
+    assert name == "半导体设备ETF国泰"
+    fund_cache = json.loads(
+        (tmp_path / "security_names" / "cn_funds.json").read_text(encoding="utf-8")
+    )
+    assert fund_cache["159516"] == "半导体设备ETF国泰"
+
+
+@pytest.mark.unit
 def test_parse_etf_profile_extracts_official_tracking_index():
     html = """
     <html><head><title>人工智能ETF易方达(159819)基金净值_天天基金网</title></head>

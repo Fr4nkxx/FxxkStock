@@ -18,10 +18,11 @@ so that:
 
 from __future__ import annotations
 
+from datetime import date
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # LLMs sometimes write a placeholder string ("None", "N/A", ...) into an optional
 # numeric field instead of omitting it. Coerce those to None so the structured
@@ -63,6 +64,53 @@ class TraderAction(str, Enum):
     BUY = "Buy"
     HOLD = "Hold"
     SELL = "Sell"
+
+
+class NextAction(str, Enum):
+    """Concrete action shown in the web decision panel."""
+
+    BUY = "Buy"
+    ADD = "Add"
+    HOLD = "Hold"
+    REDUCE = "Reduce"
+    EXIT = "Exit"
+    WAIT = "Wait"
+
+
+class CalendarNodeType(str, Enum):
+    REVIEW = "review"
+    EXECUTION = "execution"
+    RISK = "risk"
+
+
+class CalendarTriggerType(str, Enum):
+    DATE = "date"
+    EVENT = "event"
+
+
+class ReviewNode(BaseModel):
+    """A calendar-safe follow-up emitted by the Portfolio Manager."""
+
+    node_type: CalendarNodeType
+    trigger_type: CalendarTriggerType
+    calendar_date: date | None = Field(
+        default=None,
+        description="Exact ISO calendar date for a date trigger; null for an event trigger.",
+    )
+    event: str | None = Field(
+        default=None,
+        description="Observable event name for an event trigger; null for a date trigger.",
+    )
+    action: str = Field(description="Concrete work to perform when this node triggers.")
+
+    @model_validator(mode="after")
+    def validate_trigger(self):
+        if self.trigger_type == CalendarTriggerType.DATE:
+            if self.calendar_date is None or self.event:
+                raise ValueError("date trigger requires calendar_date and no event")
+        elif not self.event or self.calendar_date is not None:
+            raise ValueError("event trigger requires event and no calendar_date")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +512,40 @@ class PortfolioDecision(BaseModel):
             "incorporate them; otherwise rely solely on the current analysis."
         ),
     )
+    next_action: NextAction = Field(
+        description=(
+            "The single immediate action. Exactly one of Buy / Add / Hold / "
+            "Reduce / Exit / Wait. Use Add/Hold/Reduce/Exit for an existing "
+            "position and Buy/Wait when the account is flat or position is unknown."
+        ),
+    )
+    execution_condition: str = Field(
+        description=(
+            "One concise, observable condition that must be met before executing "
+            "the action, using a price, volume, earnings, filing, or event trigger."
+        ),
+    )
+    risk_boundary: str = Field(
+        description=(
+            "One concise, observable invalidation or risk condition that requires "
+            "stopping, reducing risk, exiting, or rerunning the analysis."
+        ),
+    )
+    review_trigger: str = Field(
+        description=(
+            "One concrete next review point, such as a report date, filing, price "
+            "breakout, risk trigger, or a specific number of trading days."
+        ),
+    )
+    review_nodes: list[ReviewNode] = Field(
+        min_length=1,
+        max_length=6,
+        description=(
+            "One to six calendar-safe follow-ups. Use an exact ISO calendar date "
+            "when evidence provides a date; otherwise use an observable event trigger. "
+            "Never include a weekday name in action or event text."
+        ),
+    )
     price_target: float | None = Field(
         default=None,
         description="Optional target price in the instrument's quote currency.",
@@ -526,7 +608,26 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
         f"**Executive Summary**: {decision.executive_summary}",
         "",
         f"**Investment Thesis**: {decision.investment_thesis}",
+        "",
+        f"**Next Action**: {decision.next_action.value}",
+        "",
+        f"**Execution Condition**: {decision.execution_condition}",
+        "",
+        f"**Risk Boundary**: {decision.risk_boundary}",
+        "",
+        f"**Review Trigger**: {decision.review_trigger}",
     ]
+    parts.extend(["", "## Review Nodes"])
+    for node in decision.review_nodes:
+        trigger = (
+            node.calendar_date.isoformat()
+            if node.trigger_type == CalendarTriggerType.DATE
+            else node.event
+        )
+        parts.append(
+            f"- [{node.trigger_type.value}][{node.node_type.value}] "
+            f"{trigger}: {node.action}"
+        )
     if decision.price_target is not None:
         parts.extend(["", f"**Price Target**: {decision.price_target}"])
     if decision.time_horizon:

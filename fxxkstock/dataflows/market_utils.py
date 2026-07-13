@@ -382,13 +382,29 @@ def get_security_cn_name(ticker: str, region: str) -> str | None:
         if _contains_chinese(name):
             return name
         if _is_cn_etf_code(bare):
+            cached_metadata = _load_etf_metadata(bare)
+            metadata_name = cached_metadata.get("fund_name")
             cached = _load_cached_fund_cn_name(bare)
+            if not cached and isinstance(metadata_name, str) and _contains_chinese(metadata_name):
+                cached = metadata_name.strip()
+                _cache_fund_cn_name(bare, cached)
             if cached:
                 return cached
             fund_name = _fetch_eastmoney_fund_cn_name(bare)
             if fund_name:
                 _cache_fund_cn_name(bare, fund_name)
                 return fund_name
+            # The lightweight fund quote endpoint is occasionally unavailable
+            # for exchange-traded funds. Fall back to the fund profile, which is
+            # also the authoritative source used by get_cn_etf_metadata().
+            metadata = _fetch_eastmoney_etf_metadata(bare)
+            profile_name = metadata.get("fund_name")
+            if isinstance(profile_name, str) and _contains_chinese(profile_name):
+                profile_name = profile_name.strip()
+                _cache_fund_cn_name(bare, profile_name)
+                merged = {**cached_metadata, **metadata, "fund_name": profile_name}
+                _cache_etf_metadata(bare, merged)
+                return profile_name
         try:
             from .cninfo import get_cn_name
 

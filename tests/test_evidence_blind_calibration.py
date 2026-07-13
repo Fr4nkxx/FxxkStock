@@ -114,6 +114,12 @@ def test_prediction_schema_limits_horizon_and_count():
         )
     base = {
         "rating": "Hold", "executive_summary": "x", "investment_thesis": "x",
+        "next_action": "Wait", "execution_condition": "x",
+        "risk_boundary": "x", "review_trigger": "x",
+        "review_nodes": [{
+            "node_type": "review", "trigger_type": "event",
+            "calendar_date": None, "event": "Next filing", "action": "Review",
+        }],
         "data_confidence": "Low", "data_confidence_reason": "x",
         "thesis_confidence": "Low", "thesis_confidence_reason": "x",
         "execution_confidence": "Low", "execution_confidence_reason": "x",

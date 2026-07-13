@@ -43,6 +43,7 @@ from cli.utils import (
     select_research_depth,
     select_shallow_thinking_agent,
 )
+from fxxkstock.dataflows.utils import safe_ticker_component
 from fxxkstock.default_config import DEFAULT_CONFIG
 from fxxkstock.graph.analyst_execution import (
     AnalystWallTimeTracker,
@@ -1277,7 +1278,12 @@ def run_analysis(checkpoint: bool | None = None):
     save_choice = typer.prompt("Save report?", default="Y").strip().upper()
     if save_choice in ("Y", "YES", ""):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_path = Path.cwd() / "reports" / f"{selections['ticker']}_{timestamp}"
+        default_path = (
+            Path.cwd()
+            / "reports"
+            / safe_ticker_component(selections["ticker"])
+            / timestamp
+        )
         save_path_str = typer.prompt(
             "Save path (press Enter for default)",
             default=str(default_path)

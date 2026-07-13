@@ -148,3 +148,21 @@ def test_imports_latest_legacy_report(tmp_path):
     assert snapshot["reports"]["fundamentals_report"] == "legacy fundamentals"
     saved = json.loads(store.path_for("600353.SS").read_text())
     assert saved["imported_from"].endswith("600353.SS_20260627_141703")
+
+
+def test_imports_latest_nested_report(tmp_path):
+    store = make_store(tmp_path)
+    report = tmp_path / "reports" / "600353.SS" / "20260628_091530"
+    (report / "1_analysts").mkdir(parents=True)
+    (report / "5_portfolio").mkdir(parents=True)
+    (report / "1_analysts" / "fundamentals.md").write_text("nested fundamentals")
+    (report / "5_portfolio" / "decision.md").write_text("nested HOLD")
+
+    snapshot = store.load("600353.SS")
+
+    assert snapshot["last_analysis_date"] == "2026-06-28"
+    assert snapshot["reports"]["fundamentals_report"] == "nested fundamentals"
+    assert Path(snapshot["imported_from"]).parts[-2:] == (
+        "600353.SS",
+        "20260628_091530",
+    )

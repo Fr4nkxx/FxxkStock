@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path
@@ -27,7 +28,9 @@ from fxxkstock.dataflows.utils import safe_ticker_component
 logger = logging.getLogger(__name__)
 
 _REPORT_DIR_PATTERN = re.compile(r"^(.+)_(\d{8})_(\d{6})$")
+_REPORT_TIME_PATTERN = re.compile(r"^(\d{8})_(\d{6})$")
 _CORE_INSIGHTS_FILE = "core_insights.json"
+_CALENDAR_NODES_FILE = "calendar_nodes.json"
 _CHART_RANGES = {
     "1d": ("1d", "5m"),
     "5d": ("5d", "15m"),
@@ -36,7 +39,7 @@ _CHART_RANGES = {
     "1y": ("1y", "1d"),
 }
 _REPORT_INDEX_FILE = "index.json"
-_REPORT_INDEX_VERSION = 2
+_REPORT_INDEX_VERSION = 3
 _OVERVIEW_CACHE_TTL_SECONDS = 60
 _QUOTE_CACHE_TTL_SECONDS = 45
 _CHART_CACHE_TTL_SECONDS = 300
@@ -74,15 +77,49 @@ def get_reports_root() -> Path:
 
 
 def _parse_report_dir_name(name: str) -> dict[str, str] | None:
-    match = _REPORT_DIR_PATTERN.match(name)
-    if not match:
-        return None
-    ticker, ymd, hms = match.groups()
+    normalized = name.strip("/")
+    parts = normalized.split("/")
+    if len(parts) == 2:
+        ticker, stamp = parts
+        stamp_match = _REPORT_TIME_PATTERN.fullmatch(stamp)
+        if not stamp_match:
+            return None
+        try:
+            safe_ticker_component(ticker)
+        except ValueError:
+            return None
+        ymd, hms = stamp_match.groups()
+    else:
+        match = _REPORT_DIR_PATTERN.match(normalized)
+        if not match:
+            return None
+        ticker, ymd, hms = match.groups()
     try:
         created_at = datetime.strptime(f"{ymd}{hms}", "%Y%m%d%H%M%S").isoformat()
     except ValueError:
         created_at = f"{ymd} {hms}"
     return {"ticker": ticker, "created_at": created_at}
+
+
+def _iter_report_directories(root: Path):
+    """Yield report directories from the new nested and legacy flat layouts."""
+    for entry in root.iterdir():
+        if not entry.is_dir():
+            continue
+        if (entry / "complete_report.md").is_file():
+            yield entry, entry.name
+            continue
+        try:
+            safe_ticker_component(entry.name)
+        except ValueError:
+            continue
+        for run_dir in entry.iterdir():
+            if (
+                run_dir.is_dir()
+                and _REPORT_TIME_PATTERN.fullmatch(run_dir.name)
+                and (run_dir / "complete_report.md").is_file()
+            ):
+                yield run_dir, f"{entry.name}/{run_dir.name}"
 
 
 def _extract_title(markdown: str) -> str:
@@ -266,19 +303,200 @@ def _safe_mtime(path: Path) -> float:
 
 def _report_fingerprints(root: Path) -> dict[str, dict[str, float]]:
     fingerprints: dict[str, dict[str, float]] = {}
-    for entry in root.iterdir():
-        if not entry.is_dir():
-            continue
-        report_file = entry / "complete_report.md"
-        if not report_file.is_file():
-            continue
-        fingerprints[entry.name] = {
-            "report_modified_at": _safe_mtime(report_file),
+    for report_dir, report_id in _iter_report_directories(root):
+        fingerprints[report_id] = {
+            "report_modified_at": _safe_mtime(report_dir / "complete_report.md"),
             "decision_modified_at": _safe_mtime(
-                entry / "5_portfolio" / "decision.md"
+                report_dir / "5_portfolio" / "decision.md"
             ),
         }
     return fingerprints
+
+
+def _decision_field(markdown: str, label: str) -> str | None:
+    match = re.search(
+        rf"\*\*{re.escape(label)}\*\*\s*[:：]\s*([^\n]+)",
+        markdown,
+        re.IGNORECASE,
+    )
+    return match.group(1).strip() if match else None
+
+
+def _remove_written_weekday(text: str) -> str:
+    return re.sub(r"[（(]\s*周[一二三四五六日天]\s*[）)]", "", text).strip()
+
+
+_CALENDAR_DATE_PATTERN = re.compile(
+    r"(?<![\d.])(?:"
+    r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})"
+    r"|"
+    r"(\d{1,2})[-/](\d{1,2})"
+    r")(?![\d.])"
+)
+
+
+def _report_year(report_dir: Path, created_at: str) -> int:
+    try:
+        return datetime.fromisoformat(created_at).year
+    except (TypeError, ValueError):
+        return datetime.fromtimestamp(report_dir.stat().st_mtime).year
+
+
+def _dated_field_nodes(
+    text: str,
+    default_year: int,
+    node_type: str,
+) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+    for raw in re.split(r"[。；;\n]+", text):
+        sentence = _remove_written_weekday(raw.strip())
+        if not sentence:
+            continue
+        for match in _CALENDAR_DATE_PATTERN.finditer(sentence):
+            if match.group(1):
+                year, month, day = map(int, match.group(1, 2, 3))
+            else:
+                year = default_year
+                month, day = map(int, match.group(4, 5))
+            try:
+                calendar_date = datetime(year, month, day).date().isoformat()
+            except ValueError:
+                continue
+            action = re.split(r"[：:]", sentence, maxsplit=1)[-1].strip()
+            nodes.append(
+                {
+                    "node_type": node_type,
+                    "trigger_type": "date",
+                    "calendar_date": calendar_date,
+                    "event": None,
+                    "action": action or sentence,
+                }
+            )
+    return nodes
+
+
+def _legacy_calendar_nodes(
+    report_dir: Path,
+    created_at: str,
+) -> list[dict[str, Any]]:
+    """Backfill nodes from the fixed decision fields in reports without JSON."""
+    markdown = _read_text(report_dir / "5_portfolio" / "decision.md")
+    if not markdown:
+        return []
+    default_year = _report_year(report_dir, created_at)
+    nodes: list[dict[str, Any]] = []
+    review = _decision_field(markdown, "Review Trigger") or ""
+    for raw in re.split(r"[。；;\n]+", review):
+        sentence = _remove_written_weekday(raw.strip())
+        if not sentence:
+            continue
+        dated = _dated_field_nodes(sentence, default_year, "review")
+        if dated:
+            nodes.extend(dated)
+            continue
+        event, action = (sentence, sentence)
+        if re.search(r"[：:]", sentence):
+            event, action = [
+                part.strip()
+                for part in re.split(r"[：:]", sentence, maxsplit=1)
+            ]
+        nodes.append(
+            {
+                "node_type": "review",
+                "trigger_type": "event",
+                "calendar_date": None,
+                "event": event,
+                "action": action,
+            }
+        )
+    for label, node_type in (
+        ("Execution Condition", "execution"),
+        ("Risk Boundary", "risk"),
+    ):
+        condition = _decision_field(markdown, label)
+        if condition:
+            nodes.extend(_dated_field_nodes(condition, default_year, node_type))
+            nodes.append(
+                {
+                    "node_type": node_type,
+                    "trigger_type": "condition",
+                    "calendar_date": None,
+                    "condition": condition,
+                    "event": None,
+                    "action": condition,
+                }
+            )
+    return nodes
+
+
+def read_calendar_nodes(
+    report_dir: Path,
+    created_at: str = "",
+) -> list[dict[str, Any]]:
+    path = report_dir / _CALENDAR_NODES_FILE
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError, TypeError):
+        return _legacy_calendar_nodes(report_dir, created_at)
+    nodes = payload.get("nodes") if isinstance(payload, dict) else None
+    result = (
+        [item for item in nodes if isinstance(item, dict)]
+        if isinstance(nodes, list)
+        else []
+    )
+    markdown = _read_text(report_dir / "5_portfolio" / "decision.md")
+    default_year = _report_year(report_dir, created_at)
+    existing = {
+        (item.get("node_type"), item.get("calendar_date"))
+        for item in result
+        if item.get("calendar_date")
+    }
+    for label, node_type in (
+        ("Review Trigger", "review"),
+        ("Execution Condition", "execution"),
+        ("Risk Boundary", "risk"),
+    ):
+        field = _decision_field(markdown, label)
+        if not field:
+            continue
+        for node in _dated_field_nodes(field, default_year, node_type):
+            key = (node_type, node["calendar_date"])
+            if key not in existing:
+                result.append(node)
+                existing.add(key)
+    return result
+
+
+def list_calendar_nodes(
+    reports_root: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Return active nodes from the latest report for each ticker."""
+    reports = list_historical_reports(reports_root, limit=1000)
+    seen: set[str] = set()
+    result: list[dict[str, Any]] = []
+    for report in reports:
+        ticker = str(report.get("ticker") or "").upper()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        report_dir = Path(report["report_dir"])
+        nodes = read_calendar_nodes(
+            report_dir,
+            str(report.get("created_at") or ""),
+        )
+        for index, item in enumerate(nodes):
+            node = dict(item)
+            node.update(
+                {
+                    "id": f"{report['id']}#{index}",
+                    "ticker": ticker,
+                    "name": report.get("name") or ticker,
+                    "report_id": report["id"],
+                    "report_created_at": report.get("created_at"),
+                }
+            )
+            result.append(node)
+    return result
 
 
 def _fingerprints_match(
@@ -346,17 +564,18 @@ def _write_report_index(
 
 def _build_report_index_item(
     entry: Path,
+    report_id: str,
     fingerprint: dict[str, float],
 ) -> dict:
     report_file = entry / "complete_report.md"
-    meta = _parse_report_dir_name(entry.name) or {
-        "ticker": entry.name,
+    meta = _parse_report_dir_name(report_id) or {
+        "ticker": report_id,
         "created_at": "",
     }
     markdown = report_file.read_text(encoding="utf-8", errors="replace")
     decision_source = _read_decision_source(entry, markdown)
     return {
-        "id": entry.name,
+        "id": report_id,
         "ticker": meta["ticker"],
         "created_at": meta["created_at"],
         "title": _extract_title(markdown) or meta["ticker"],
@@ -374,7 +593,10 @@ def _rebuild_report_index(
     items: list[dict] = []
     for report_id, fingerprint in fingerprints.items():
         try:
-            items.append(_build_report_index_item(root / report_id, fingerprint))
+            report_dir = root.joinpath(*report_id.split("/"))
+            items.append(
+                _build_report_index_item(report_dir, report_id, fingerprint)
+            )
         except OSError as exc:
             logger.debug("Skipping report %s during index rebuild: %s", report_id, exc)
     items.sort(key=lambda x: x["modified_at"], reverse=True)
@@ -401,17 +623,26 @@ def list_historical_reports(
 def _validate_report_id(report_id: str) -> None:
     if not report_id or report_id in {".", ".."}:
         raise ValueError("invalid report id")
-    if "/" in report_id or "\\" in report_id or ".." in report_id:
+    if "\\" in report_id or ".." in report_id or Path(report_id).is_absolute():
         raise ValueError("invalid report id")
+    parts = report_id.split("/")
+    if len(parts) > 2 or any(not part or part in {".", ".."} for part in parts):
+        raise ValueError("invalid report id")
+    if len(parts) == 2:
+        safe_ticker_component(parts[0])
+        if not _REPORT_TIME_PATTERN.fullmatch(parts[1]):
+            raise ValueError("invalid report id")
 
 
 def get_historical_report(report_id: str, reports_root: Path | None = None) -> dict:
     """读取单个历史报告。"""
     _validate_report_id(report_id)
     root = reports_root or get_reports_root()
-    report_dir = (root / report_id).resolve()
-    if not str(report_dir).startswith(str(root.resolve())):
-        raise ValueError("invalid report path")
+    report_dir = root.joinpath(*report_id.split("/")).resolve()
+    try:
+        report_dir.relative_to(root.resolve())
+    except ValueError as exc:
+        raise ValueError("invalid report path") from exc
     report_file = report_dir / "complete_report.md"
     if not report_file.is_file():
         raise FileNotFoundError(report_id)
@@ -432,6 +663,46 @@ def get_historical_report(report_id: str, reports_root: Path | None = None) -> d
         "core_insights": read_core_insights(report_dir),
         "report_dir": str(report_dir),
     }
+
+
+def delete_historical_report(report_id: str, reports_root: Path | None = None) -> dict[str, Any]:
+    """Delete one validated report directory and prune an empty ticker folder."""
+    _validate_report_id(report_id)
+    root = (reports_root or get_reports_root()).resolve()
+    report_dir = root.joinpath(*report_id.split("/")).resolve()
+    try:
+        report_dir.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("invalid report path") from exc
+    if not (report_dir / "complete_report.md").is_file():
+        raise FileNotFoundError(report_id)
+    shutil.rmtree(report_dir)
+    parent = report_dir.parent
+    if parent != root and parent.parent == root and not any(parent.iterdir()):
+        parent.rmdir()
+    _overview_cache.clear()
+    return {"deleted": True, "report_id": report_id}
+
+
+def delete_stock_reports(ticker: str, reports_root: Path | None = None) -> dict[str, Any]:
+    """Delete all nested and legacy report directories for one ticker."""
+    ticker = normalize_symbol(ticker.strip()).upper()
+    safe_ticker_component(ticker)
+    root = reports_root or get_reports_root()
+    if not root.is_dir():
+        return {"deleted": True, "ticker": ticker, "reports_deleted": 0}
+    matches = [
+        (report_dir, report_id)
+        for report_dir, report_id in _iter_report_directories(root)
+        if (_parse_report_dir_name(report_id) or {}).get("ticker", "").upper() == ticker
+    ]
+    for report_dir, _ in matches:
+        shutil.rmtree(report_dir)
+    ticker_dir = root / ticker
+    if ticker_dir.is_dir() and not any(ticker_dir.iterdir()):
+        ticker_dir.rmdir()
+    _overview_cache.clear()
+    return {"deleted": True, "ticker": ticker, "reports_deleted": len(matches)}
 
 
 def _normalize_requested_ticker(ticker: str) -> str:

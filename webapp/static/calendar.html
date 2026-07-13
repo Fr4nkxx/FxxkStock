@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FxxKStock 节点日历</title>
+  <link rel="icon" type="image/png" sizes="64x64" href="/static/favicon.png" />
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <script>
+    (() => {
+      const stored = localStorage.getItem("fxxkstock.theme");
+      const system = window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.dataset.theme = stored || system;
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#0c1018; --panel:rgba(25,34,45,.9); --panel-2:rgba(32,42,55,.9);
+      --line:rgba(151,164,184,.24); --line-soft:rgba(151,164,184,.14);
+      --text:#eef4f8; --text-soft:#cbd7df; --muted:#94a4b0; --faint:#6f7d89;
+      --accent:#4fb7c6; --accent-strong:#8c7cf0; --accent-soft:rgba(79,183,198,.17);
+      --blue:#6ea0f6; --blue-soft:rgba(110,160,246,.16); --amber:#d9aa55;
+      --amber-soft:rgba(217,170,85,.17); --violet:#b08cf4; --violet-soft:rgba(176,140,244,.17);
+      --app-gradient:linear-gradient(135deg,rgba(79,183,198,.16),transparent 34%),linear-gradient(225deg,rgba(176,140,244,.13),transparent 38%),linear-gradient(180deg,#101621 0%,#080b10 100%);
+      --panel-gradient:linear-gradient(145deg,rgba(79,183,198,.1),transparent 42%),rgba(25,34,45,.9);
+      --topbar-bg:rgba(14,19,28,.86); --subtle-fill:rgba(255,255,255,.035); --shadow:0 18px 50px rgba(0,0,0,.28); --radius:8px;
+    }
+    :root[data-theme="light"] {
+      color-scheme:light;
+      --bg:#f4f7fb; --panel:rgba(255,255,255,.84); --panel-2:rgba(244,247,252,.9);
+      --line:rgba(71,86,104,.2); --line-soft:rgba(71,86,104,.12);
+      --text:#152232; --text-soft:#33465b; --muted:#64758a; --faint:#8492a4;
+      --accent:#287f97; --accent-strong:#6b5fd6; --accent-soft:rgba(40,127,151,.12);
+      --blue:#336ebd; --blue-soft:rgba(51,110,189,.12); --amber:#9f7225;
+      --amber-soft:rgba(159,114,37,.13); --violet:#7253c7; --violet-soft:rgba(114,83,199,.13);
+      --app-gradient:linear-gradient(135deg,rgba(73,160,184,.22),transparent 36%),linear-gradient(225deg,rgba(130,106,218,.18),transparent 42%),linear-gradient(180deg,#fbfcff 0%,#edf3fa 100%);
+      --panel-gradient:linear-gradient(145deg,rgba(73,160,184,.12),transparent 42%),rgba(255,255,255,.86);
+      --topbar-bg:rgba(255,255,255,.78); --subtle-fill:rgba(20,32,45,.035); --shadow:0 18px 48px rgba(46,61,82,.12);
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:var(--app-gradient); color:var(--text); font:13px/1.45 Inter,"SF Pro Text","PingFang SC","Microsoft YaHei",system-ui,sans-serif; }
+    button { cursor:pointer; font:inherit; color:inherit; }
+    .icon { width:16px; height:16px; flex:0 0 auto; stroke-width:1.8; }
+    .topbar { position:sticky; top:0; z-index:20; min-height:64px; padding:0 22px; display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--line); background:var(--topbar-bg); backdrop-filter:blur(18px); }
+    .brand { min-width:0; display:flex; align-items:center; gap:10px; margin-right:auto; font-size:17px; font-weight:760; }
+    .brand img { width:24px; height:24px; border-radius:6px; }
+    .brand span { color:var(--muted); font-size:12px; font-weight:600; white-space:nowrap; }
+    .btn,.icon-btn,.back { height:36px; display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:0 12px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--text-soft); text-decoration:none; }
+    .icon-btn { width:36px; padding:0; }
+    .btn.active { border-color:rgba(79,183,198,.55); background:var(--accent-soft); color:var(--text); font-weight:760; }
+    .page { width:min(1280px,100%); margin:0 auto; padding:22px; }
+    .page-head { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:18px; }
+    h1,h2,h3,p { margin:0; }
+    h1 { font-size:24px; }
+    .subtitle { margin-top:6px; color:var(--muted); }
+    .view-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+    .view { display:none; }
+    .view.active { display:block; }
+    .calendar-layout { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(290px,.7fr); gap:14px; align-items:start; }
+    .panel { min-width:0; padding:16px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel-gradient); box-shadow:var(--shadow); }
+    .panel-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+    .month-nav { display:flex; gap:7px; }
+    .week-row,.month-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px; }
+    .week-row { margin-bottom:6px; color:var(--muted); text-align:center; font-size:11px; }
+    .day { min-height:82px; padding:8px; border:1px solid var(--line-soft); border-radius:7px; background:var(--subtle-fill); text-align:left; }
+    .day:hover { border-color:rgba(79,183,198,.45); background:var(--accent-soft); }
+    .day.selected { border-color:var(--accent); background:var(--accent-soft); }
+    .day.muted { color:var(--faint); opacity:.62; }
+    .day-num { display:block; margin-bottom:10px; }
+    .markers { display:flex; gap:4px; flex-wrap:wrap; }
+    .marker,.node-dot { width:8px; height:8px; border-radius:999px; background:var(--blue); }
+    .marker.risk,.node-dot.risk { background:var(--amber); }
+    .marker.review,.node-dot.review { background:var(--violet); }
+    .legend { display:flex; gap:14px; flex-wrap:wrap; margin-top:14px; color:var(--muted); font-size:11px; }
+    .legend span { display:flex; align-items:center; gap:6px; }
+    .node-list { display:grid; gap:12px; }
+    .node-item { display:grid; grid-template-columns:10px minmax(0,1fr); gap:10px; padding-bottom:12px; border-bottom:1px solid var(--line-soft); }
+    .node-item:last-child { padding-bottom:0; border-bottom:0; }
+    .node-dot { margin-top:6px; }
+    .node-title { display:flex; justify-content:space-between; gap:8px; color:var(--text); font-weight:700; }
+    .node-title span:last-child { color:var(--muted); font-size:11px; font-weight:600; white-space:nowrap; }
+    .node-copy { margin-top:5px; color:var(--text-soft); }
+    .condition-row { display:grid; grid-template-columns:140px minmax(0,1fr) 90px; gap:14px; align-items:center; padding:15px 0; border-bottom:1px solid var(--line-soft); }
+    .condition-row:last-child { border-bottom:0; }
+    .condition-copy,.status { color:var(--muted); }
+    .status { text-align:right; }
+    .empty { padding:42px 16px; color:var(--muted); text-align:center; }
+    @media (max-width:800px) { .calendar-layout { grid-template-columns:1fr; } .day { min-height:62px; padding:6px; } .page { padding:14px; } .brand span { display:none; } }
+    @media (max-width:560px) { .condition-row { grid-template-columns:1fr; gap:5px; } .status { text-align:left; } .back span { display:none; } .week-row,.month-grid { gap:3px; } .day { min-height:50px; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="/static/fxxkstock-icon.png" alt="" />FxxKStock <span>投资节点中心</span></div>
+    <button class="icon-btn" id="themeToggle" type="button" aria-label="切换昼夜主题"><i data-lucide="moon" class="icon"></i></button>
+    <a class="back" href="/"><i data-lucide="arrow-left" class="icon"></i><span>返回分析</span></a>
+  </header>
+
+  <main class="page">
+    <div class="page-head"><div><h1>节点日历</h1><p class="subtitle">统一查看复盘、执行与风险触发节点</p></div></div>
+    <div class="view-tabs" role="tablist" aria-label="节点视图">
+      <button class="btn active" id="todayTab" type="button" data-view="today">今日节点 0</button>
+      <button class="btn" id="weekTab" type="button" data-view="week">未来 7 天 0</button>
+      <button class="btn" id="conditionsTab" type="button" data-view="conditions">条件触发 0</button>
+    </div>
+
+    <section class="view active" id="todayView">
+      <div class="calendar-layout">
+        <article class="panel">
+          <div class="panel-head"><h2 id="monthTitle">-</h2><div class="month-nav"><button class="icon-btn" id="prevMonthBtn" type="button" aria-label="上个月"><i data-lucide="chevron-left" class="icon"></i></button><button class="btn" id="todayBtn" type="button">今天</button><button class="icon-btn" id="nextMonthBtn" type="button" aria-label="下个月"><i data-lucide="chevron-right" class="icon"></i></button></div></div>
+          <div class="week-row"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+          <div class="month-grid" id="monthGrid"></div>
+          <div class="legend"><span><i class="marker"></i>执行节点</span><span><i class="marker risk"></i>风险节点</span><span><i class="marker review"></i>复盘节点</span></div>
+        </article>
+        <aside class="panel"><div class="panel-head"><h2 id="selectedDateTitle">-</h2><span class="status" id="selectedDateMeta">-</span></div><div class="node-list" id="selectedDateNodes"></div></aside>
+      </div>
+    </section>
+
+    <section class="view" id="weekView"><article class="panel"><div class="panel-head"><h2>未来 7 天</h2><span class="status" id="weekMeta">0 个节点</span></div><div class="node-list" id="weekNodes"></div></article></section>
+
+    <section class="view" id="conditionsView"><article class="panel"><div class="panel-head"><h2>条件触发</h2><span class="status" id="conditionsMeta">0 个条件</span></div><div id="conditionNodes"></div></article></section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let CALENDAR_NODES = {};
+    let ALL_NODES = [];
+    const pad = (value) => String(value).padStart(2, "0");
+    const dateKey = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    const fromDateKey = (key) => {
+      const [year, month, day] = key.split("-").map(Number);
+      return new Date(year, month - 1, day);
+    };
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let visibleMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    let selectedDate = dateKey(today);
+
+    function escapeHtml(value) {
+      const node = document.createElement("div");
+      node.textContent = String(value || "");
+      return node.innerHTML;
+    }
+    function nodeTone(node) {
+      if (node.node_type === "risk") return "risk";
+      if (node.node_type === "review") return "review";
+      return "";
+    }
+    function nodeTypeLabel(node) {
+      return { review:"复盘", execution:"执行", risk:"风险" }[node.node_type] || "节点";
+    }
+    function instrumentLabel(node) {
+      return node.name && node.name !== node.ticker ? `${node.ticker} · ${node.name}` : node.ticker;
+    }
+    function weekdayLabel(date) {
+      return `周${["日", "一", "二", "三", "四", "五", "六"][date.getDay()]}`;
+    }
+    function nodeItemHtml(item, includeDate = false) {
+      const date = item.calendar_date ? fromDateKey(item.calendar_date) : null;
+      const prefix = includeDate && date ? `${date.getMonth() + 1} 月 ${date.getDate()} 日 ${weekdayLabel(date)} · ` : "";
+      return `<div class="node-item"><i class="node-dot ${nodeTone(item)}"></i><div>
+        <div class="node-title"><span>${escapeHtml(prefix + instrumentLabel(item))}</span><span>${escapeHtml(nodeTypeLabel(item))}</span></div>
+        <div class="node-copy">${escapeHtml(item.action)}</div>
+      </div></div>`;
+    }
+    function renderSelectedDate() {
+      const date = fromDateKey(selectedDate);
+      const nodes = CALENDAR_NODES[selectedDate] || [];
+      $("selectedDateTitle").textContent = `${date.getMonth() + 1} 月 ${date.getDate()} 日 ${weekdayLabel(date)}`;
+      $("selectedDateMeta").textContent = selectedDate === dateKey(today) ? "今日" : nodes.length ? `${nodes.length} 个节点` : "暂无节点";
+      $("selectedDateNodes").innerHTML = nodes.length ? nodes.map((item) => nodeItemHtml(item)).join("") : '<div class="empty">这一天没有安排工作</div>';
+    }
+    function renderMonth() {
+      const year = visibleMonth.getFullYear();
+      const month = visibleMonth.getMonth();
+      $("monthTitle").textContent = `${year} 年 ${month + 1} 月`;
+      const first = new Date(year, month, 1);
+      const gridStart = new Date(year, month, 1 - ((first.getDay() + 6) % 7));
+      const days = [];
+      for (let index = 0; index < 42; index += 1) {
+        const date = new Date(gridStart);
+        date.setDate(gridStart.getDate() + index);
+        const key = dateKey(date);
+        const nodes = CALENDAR_NODES[key] || [];
+        const markers = nodes.map((item) => `<i class="marker ${nodeTone(item)}"></i>`).join("");
+        days.push(`<button class="day ${date.getMonth() === month ? "" : "muted"} ${key === selectedDate ? "selected" : ""}" type="button" data-date="${key}" aria-label="${key}，${nodes.length} 个节点"><span class="day-num">${date.getDate()}</span>${markers ? `<span class="markers">${markers}</span>` : ""}</button>`);
+      }
+      $("monthGrid").innerHTML = days.join("");
+      document.querySelectorAll(".day").forEach((day) => day.addEventListener("click", () => {
+        selectedDate = day.dataset.date;
+        const picked = fromDateKey(selectedDate);
+        if (picked.getMonth() !== visibleMonth.getMonth() || picked.getFullYear() !== visibleMonth.getFullYear()) {
+          visibleMonth = new Date(picked.getFullYear(), picked.getMonth(), 1);
+        }
+        renderMonth();
+        renderSelectedDate();
+      }));
+    }
+    function moveMonth(offset) {
+      visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + offset, 1);
+      selectedDate = dateKey(visibleMonth);
+      renderMonth();
+      renderSelectedDate();
+    }
+    function renderWeekAndConditions() {
+      const end = new Date(today);
+      end.setDate(end.getDate() + 7);
+      const upcoming = ALL_NODES.filter((item) => {
+        if (!item.calendar_date) return false;
+        const date = fromDateKey(item.calendar_date);
+        return date > today && date <= end;
+      }).sort((a, b) => a.calendar_date.localeCompare(b.calendar_date));
+      const conditional = ALL_NODES.filter((item) => item.trigger_type !== "date");
+      $("todayTab").textContent = `今日节点 ${(CALENDAR_NODES[dateKey(today)] || []).length}`;
+      $("weekTab").textContent = `未来 7 天 ${upcoming.length}`;
+      $("conditionsTab").textContent = `条件触发 ${conditional.length}`;
+      $("weekMeta").textContent = `${upcoming.length} 个节点`;
+      $("weekNodes").innerHTML = upcoming.length
+        ? upcoming.map((item) => nodeItemHtml(item, true)).join("")
+        : '<div class="empty">未来 7 天没有安排工作</div>';
+      $("conditionsMeta").textContent = `${conditional.length} 个条件`;
+      $("conditionNodes").innerHTML = conditional.length ? conditional.map((item) => {
+        const trigger = item.event || item.condition || "等待条件";
+        return `<div class="condition-row"><strong>${escapeHtml(instrumentLabel(item))}</strong><div><div>${escapeHtml(trigger)}</div><div class="condition-copy">触发后：${escapeHtml(item.action)}</div></div><span class="status">监控中</span></div>`;
+      }).join("") : '<div class="empty">还没有来自分析报告的条件节点</div>';
+    }
+    async function loadCalendarNodes() {
+      const response = await fetch("/api/calendar/nodes");
+      if (!response.ok) throw new Error(`calendar API ${response.status}`);
+      const payload = await response.json();
+      ALL_NODES = Array.isArray(payload.nodes) ? payload.nodes : [];
+      CALENDAR_NODES = {};
+      ALL_NODES.forEach((item) => {
+        if (!item.calendar_date) return;
+        (CALENDAR_NODES[item.calendar_date] ||= []).push(item);
+      });
+      renderMonth();
+      renderSelectedDate();
+      renderWeekAndConditions();
+    }
+    function applyTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      localStorage.setItem("fxxkstock.theme", theme);
+      $("themeToggle").innerHTML = `<i data-lucide="${theme === "light" ? "sun" : "moon"}" class="icon"></i>`;
+      lucide.createIcons();
+    }
+    $("themeToggle").addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"));
+    document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => {
+      document.querySelectorAll("[data-view]").forEach((item) => item.classList.toggle("active", item === button));
+      document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
+      $(`${button.dataset.view}View`).classList.add("active");
+    }));
+    $("prevMonthBtn").addEventListener("click", () => moveMonth(-1));
+    $("nextMonthBtn").addEventListener("click", () => moveMonth(1));
+    $("todayBtn").addEventListener("click", () => {
+      visibleMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      selectedDate = dateKey(today);
+      renderMonth();
+      renderSelectedDate();
+    });
+    renderMonth();
+    renderSelectedDate();
+    renderWeekAndConditions();
+    loadCalendarNodes().catch(() => {
+      $("selectedDateNodes").innerHTML = '<div class="empty">节点数据加载失败，请稍后刷新</div>';
+    });
+    applyTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
+  </script>
+</body>
+</html>

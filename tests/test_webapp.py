@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -54,6 +55,39 @@ def test_api_models_lists_providers():
     assert "openai" in data["provider_list"]
     assert "quick" in data["providers"]["openai"]
     assert "deep" in data["providers"]["openai"]
+
+
+@pytest.mark.unit
+def test_calendar_page_and_home_navigation_are_available():
+    client = TestClient(app)
+    response = client.get("/calendar")
+    assert response.status_code == 200
+    assert "节点日历" in response.text
+    home = client.get("/")
+    assert home.status_code == 200
+    assert 'href="/calendar"' in home.text
+    assert 'id="prevMonthBtn"' in response.text
+    assert 'id="nextMonthBtn"' in response.text
+    assert 'id="selectedDateNodes"' in response.text
+    assert "function renderMonth" in response.text
+    assert "function renderSelectedDate" in response.text
+    assert 'fetch("/api/calendar/nodes")' in response.text
+    assert "function renderWeekAndConditions" in response.text
+    assert "data-delete-ticker" in home.text
+    assert "data-delete-report" in home.text
+    assert "function deleteStock" in home.text
+    assert "function deleteReport" in home.text
+    assert 'id="positionQuantity"' in home.text
+    assert "持股数量（可选）" in home.text
+    assert "POSITION_COSTS_KEY" in home.text
+    bound_ids = re.findall(r'\$\("([A-Za-z0-9_-]+)"\)\.addEventListener', home.text)
+    assert bound_ids
+    assert all(f'id="{element_id}"' in home.text for element_id in bound_ids)
+    assert ".run-fill {" in home.text
+    assert "display: block;" in home.text
+    assert "transition: width .28s ease;" in home.text
+    assert "贵州茅台" not in response.text
+    assert "五粮液" not in response.text
 
 
 @pytest.mark.unit
@@ -279,9 +313,9 @@ def test_run_request_position_is_optional_and_validated():
         ticker="159516.SZ",
         quick_model="quick",
         deep_model="deep",
-        position={"status": "held", "quantity": 1000, "average_cost": 1.72},
+        position={"status": "held", "average_cost": 1.72},
     )
-    assert held.position.quantity == 1000
+    assert held.position.quantity is None
 
     with pytest.raises(ValidationError):
         RunRequest(
@@ -402,8 +436,8 @@ def test_list_historical_reports(tmp_path):
 
 @pytest.mark.unit
 def test_list_historical_reports_uses_index_cache(tmp_path, monkeypatch):
-    report_dir = tmp_path / "600353.SS_20260627_141703"
-    report_dir.mkdir()
+    report_dir = tmp_path / "600353.SS" / "20260627_141703"
+    report_dir.mkdir(parents=True)
     (report_dir / "complete_report.md").write_text(
         "# Trading Analysis Report: 600353.SS\n\nFINAL TRANSACTION PROPOSAL: **SELL**",
         encoding="utf-8",
@@ -425,7 +459,7 @@ def test_list_historical_reports_uses_index_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "read_text", guarded_read_text)
     second = history.list_historical_reports(tmp_path)
 
-    assert second[0]["id"] == "600353.SS_20260627_141703"
+    assert second[0]["id"] == "600353.SS/20260627_141703"
     assert second[0]["decision"] == "SELL"
 
 
@@ -451,6 +485,90 @@ def test_report_index_rebuilds_when_report_set_changes(tmp_path):
 
     items = history.list_historical_reports(tmp_path)
     assert {item["ticker"] for item in items} == {"600353.SS", "159516.SZ"}
+def test_nested_report_layout_is_listed_and_read(tmp_path):
+    report_dir = tmp_path / "600353.SS" / "20260628_091530"
+    report_dir.mkdir(parents=True)
+    (report_dir / "complete_report.md").write_text(
+        "# Trading Analysis Report: 600353.SS\n\nFINAL TRANSACTION PROPOSAL: **HOLD**",
+        encoding="utf-8",
+    )
+
+    from webapp.history import get_historical_report, list_historical_reports
+
+    items = list_historical_reports(tmp_path)
+    assert len(items) == 1
+    assert items[0]["id"] == "600353.SS/20260628_091530"
+    assert items[0]["ticker"] == "600353.SS"
+    assert items[0]["created_at"] == "2026-06-28T09:15:30"
+
+    detail = get_historical_report("600353.SS/20260628_091530", tmp_path)
+    assert detail["available"] is True
+    assert detail["ticker"] == "600353.SS"
+
+
+@pytest.mark.unit
+def test_delete_historical_report_and_prune_ticker_directory(tmp_path):
+    report_dir = tmp_path / "600353.SS" / "20260628_091530"
+    report_dir.mkdir(parents=True)
+    (report_dir / "complete_report.md").write_text("# Report", encoding="utf-8")
+
+    from webapp.history import delete_historical_report
+
+    result = delete_historical_report("600353.SS/20260628_091530", tmp_path)
+    assert result == {"deleted": True, "report_id": "600353.SS/20260628_091530"}
+    assert not report_dir.exists()
+    assert not (tmp_path / "600353.SS").exists()
+
+
+@pytest.mark.unit
+def test_delete_stock_reports_removes_nested_and_legacy_layouts(tmp_path):
+    nested = tmp_path / "600353.SS" / "20260628_091530"
+    legacy = tmp_path / "600353.SS_20260627_141703"
+    other = tmp_path / "159819.SZ" / "20260711_120000"
+    for report_dir in (nested, legacy, other):
+        report_dir.mkdir(parents=True)
+        (report_dir / "complete_report.md").write_text("# Report", encoding="utf-8")
+
+    from webapp.history import delete_stock_reports
+
+    result = delete_stock_reports("600353.SS", tmp_path)
+    assert result["reports_deleted"] == 2
+    assert not nested.exists()
+    assert not legacy.exists()
+    assert other.exists()
+
+
+@pytest.mark.unit
+def test_legacy_review_trigger_is_backfilled_into_calendar_nodes(tmp_path):
+    report_dir = tmp_path / "159819.SZ" / "20260711_120000"
+    portfolio = report_dir / "5_portfolio"
+    portfolio.mkdir(parents=True)
+    (report_dir / "complete_report.md").write_text("# Report 159819.SZ", encoding="utf-8")
+    (portfolio / "decision.md").write_text(
+        "**Review Trigger**: 07-13（周一）收盘：执行FC01证伪测试。"
+        "07-17（周四）WAIC大会后收盘：评估核心催化剂。"
+        "下一融资余额报告发布日：验证融资盘行为方向。\n\n"
+        "**Execution Condition**: 价格回踩至¥2.08-2.12区间。若07-16收盘前未触发则放弃加仓。\n\n"
+        "**Risk Boundary**: 收盘跌破风险位。",
+        encoding="utf-8",
+    )
+
+    from webapp.history import list_calendar_nodes
+
+    nodes = list_calendar_nodes(tmp_path)
+    dated = [item for item in nodes if item.get("trigger_type") == "date"]
+    events = [item for item in nodes if item.get("trigger_type") == "event"]
+    assert sorted(item["calendar_date"] for item in dated) == [
+        "2026-07-13", "2026-07-16", "2026-07-17"
+    ]
+    assert all(item["calendar_date"] != "2026-02-08" for item in dated)
+    deadline = next(item for item in dated if item["calendar_date"] == "2026-07-16")
+    assert deadline["node_type"] == "execution"
+    assert "未触发则放弃加仓" in deadline["action"]
+    assert all("周" not in item["action"] for item in dated)
+    assert events[0]["event"] == "下一融资余额报告发布日"
+    assert events[0]["action"] == "验证融资盘行为方向"
+    assert {item["node_type"] for item in nodes} >= {"review", "execution", "risk"}
 
 
 @pytest.mark.unit
@@ -512,6 +630,48 @@ def test_api_report_history(tmp_path):
         detail = client.get("/api/reports/history/600353.SS_20260627_141703")
         assert detail.status_code == 200
         assert detail.json()["markdown"].startswith("# Report")
+
+    with patch("webapp.server.get_historical_report", return_value={
+        "id": "600353.SS/20260628_091530",
+        "available": True,
+        "ticker": "600353.SS",
+        "markdown": "# Nested Report\n\nHOLD",
+        "decision": "HOLD",
+    }) as nested_loader:
+        detail = client.get("/api/reports/history/600353.SS/20260628_091530")
+        assert detail.status_code == 200
+        nested_loader.assert_called_once_with("600353.SS/20260628_091530")
+
+    with patch("webapp.server.delete_historical_report", return_value={
+        "deleted": True,
+        "report_id": "600353.SS/20260628_091530",
+    }) as report_deleter:
+        deleted = client.delete("/api/reports/history/600353.SS/20260628_091530")
+        assert deleted.status_code == 200
+        report_deleter.assert_called_once_with("600353.SS/20260628_091530")
+
+    RUNS.clear()
+    with patch("webapp.server.delete_stock_reports", return_value={
+        "deleted": True,
+        "ticker": "600353.SS",
+        "reports_deleted": 2,
+    }) as stock_deleter:
+        deleted = client.delete("/api/stocks/600353.SS")
+        assert deleted.status_code == 200
+        assert deleted.json()["reports_deleted"] == 2
+        stock_deleter.assert_called_once_with("600353.SS")
+
+    with patch("webapp.server.list_calendar_nodes", return_value=[{
+        "id": "159819.SZ/20260711_120000#0",
+        "ticker": "159819.SZ",
+        "node_type": "review",
+        "trigger_type": "date",
+        "calendar_date": "2026-07-13",
+        "action": "执行FC01证伪测试",
+    }]):
+        nodes = client.get("/api/calendar/nodes")
+        assert nodes.status_code == 200
+        assert nodes.json()["nodes"][0]["calendar_date"] == "2026-07-13"
 
 
 @pytest.mark.unit
@@ -645,14 +805,16 @@ def test_overview_identity_ignores_exchange_name_from_report(monkeypatch):
 
 
 @pytest.mark.unit
-def test_analysis_progress_is_rendered_inside_stock_card():
+def test_analysis_progress_is_rendered_inside_stock_card_without_main_run_panel():
     html = (Path(__file__).parents[1] / "webapp" / "static" / "index.html").read_text(
         encoding="utf-8"
     )
     assert 'class="analysis-strip"' not in html
     assert "run-track" in html
     assert "run-fill" in html
-    assert 'id="stageLine"' in html
+    assert 'id="stageLine"' not in html
+    assert 'id="runStatus"' not in html
+    assert 'id="eventList"' not in html
     assert "group.activeRun?.percent" in html
     assert 'id="debugBtn"' in html
 
@@ -800,6 +962,19 @@ def test_stock_quote_uses_eastmoney_daily_when_latest_quote_unavailable(monkeypa
     assert result["quote"]["last_price"] == 54.19
     assert result["quote"]["change_percent"] == pytest.approx(2.438563327032136)
     assert result["quote"]["turnover"] == 2661689093.46
+
+
+@pytest.mark.unit
+def test_next_actions_use_four_fixed_portfolio_manager_fields():
+    html = (Path(__file__).parents[1] / "webapp" / "static" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert "function renderNextActions" in html
+    assert 'parseField(markdown, "Next Action")' in html
+    assert 'parseField(markdown, "Execution Condition")' in html
+    assert 'parseField(markdown, "Risk Boundary")' in html
+    assert 'parseField(markdown, "Review Trigger")' in html
+    assert "renderCorePoints" not in html
 
 
 @pytest.mark.unit

@@ -205,10 +205,11 @@ def _build_vendor_chain(method: str, explicit: list[str], all_available: list[st
     config = get_config()
     region = config.get("market_region", "default")
 
-    if explicit:
-        base = [v for v in explicit if v in VENDOR_METHODS[method]]
-    else:
-        base = all_available
+    base = (
+        [vendor for vendor in explicit if vendor in VENDOR_METHODS[method]]
+        if explicit
+        else all_available
+    )
 
     if not config.get("cn_data_enabled", True) or not is_cn_region(region):
         return base
