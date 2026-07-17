@@ -33,6 +33,7 @@ GENERAL_ENV_MAP: dict[str, str] = {
     "web_research_depth": "FXXKSTOCK_WEB_RESEARCH_DEPTH",
     "web_analysis_mode": "FXXKSTOCK_WEB_ANALYSIS_MODE",
     "parallel_initial_analysts": "FXXKSTOCK_PARALLEL_INITIAL_ANALYSTS",
+    "parallel_blind_researchers": "FXXKSTOCK_PARALLEL_BLIND_RESEARCHERS",
     "cn_market_data_source": "FXXKSTOCK_CN_MARKET_DATA_SOURCE",
     "news_article_limit": "FXXKSTOCK_NEWS_ARTICLE_LIMIT",
     "global_news_article_limit": "FXXKSTOCK_GLOBAL_NEWS_LIMIT",
@@ -44,6 +45,7 @@ GENERAL_ENV_MAP: dict[str, str] = {
     "cn_browser_startup_timeout_seconds": "FXXKSTOCK_CHROME_STARTUP_TIMEOUT",
     "cn_browser_auto_start": "FXXKSTOCK_CHROME_AUTO_START",
     "cn_browser_auto_close": "FXXKSTOCK_CHROME_AUTO_CLOSE",
+    "cn_browser_mode": "FXXKSTOCK_CHROME_MODE",
 }
 
 _DEPTH_ROUNDS = {"simple": 1, "medium": 3, "complex": 5}

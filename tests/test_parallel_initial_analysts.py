@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
 
+from fxxkstock.dataflows.errors import NoMarketDataError
 from fxxkstock.graph.analyst_execution import build_analyst_execution_plan
 from fxxkstock.graph.parallel_analysts import (
     create_parallel_initial_analysts_node,
@@ -21,6 +23,16 @@ def market_lookup() -> str:
 def news_lookup() -> str:
     """Return fixture news data."""
     return "news_lookup result"
+
+
+@tool
+def failed_market_lookup() -> str:
+    """Simulate exhausted market-data vendors."""
+    raise NoMarketDataError(
+        "600353.SS",
+        "1.600353",
+        "Yahoo returned no rows; Eastmoney proxy unavailable",
+    )
 
 
 def _analyst_with_one_tool_round(label: str, report_key: str):
@@ -93,3 +105,39 @@ def test_parallel_initial_analysts_runs_tool_loops_and_merges_reports():
         "news_lookup result",
         "news report",
     ]
+
+
+def test_parallel_initial_analyst_error_includes_vendor_cause():
+    plan = build_analyst_execution_plan(["market"])
+
+    def market_analyst(state):
+        return {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "id": "failed-market",
+                            "name": "failed_market_lookup",
+                            "args": {},
+                        }
+                    ],
+                )
+            ],
+            "market_report": "",
+        }
+
+    node = create_parallel_initial_analysts_node(
+        plan,
+        {"market": market_analyst},
+        {"market": ToolNode([failed_market_lookup])},
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"Market Analyst: NoMarketDataError: No market data.*proxy unavailable",
+    ):
+        node(
+            {"messages": [HumanMessage(content="600353.SS")]},
+            runtime=Runtime(),
+        )

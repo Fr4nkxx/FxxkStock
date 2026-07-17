@@ -42,10 +42,12 @@ def render_account_position_section(position: dict | None) -> str:
     currency_suffix = f" {currency}" if currency else ""
     rows = [("持仓状态", "持有")]
     if context.get("quantity") is not None:
-        rows.append((
+        rows.append(
+            (
             "持股数量",
             _format_position_number(context["quantity"], 6, trim_trailing_zeros=True),
-        ))
+            )
+        )
     rows.append(
         (
             "真实平均成本",
@@ -53,12 +55,15 @@ def render_account_position_section(position: dict | None) -> str:
         )
     )
     if context.get("current_price") is not None:
-        rows.append((
+        rows.append(
+            (
             "本次权威现价",
             f"{_format_position_number(context['current_price'], 6, trim_trailing_zeros=True)}{currency_suffix}",
-        ))
+            )
+        )
         if context.get("market_value") is not None:
-            rows.extend([
+            rows.extend(
+                [
                 (
                     "持仓成本",
                     f"{_format_position_number(context['cost_basis'])}{currency_suffix}",
@@ -71,7 +76,8 @@ def render_account_position_section(position: dict | None) -> str:
                     "浮动盈亏",
                     f"{_format_position_number(context['unrealized_pnl'])}{currency_suffix}",
                 ),
-            ])
+                ]
+            )
         rows.append(("浮动收益率", f"{float(context['unrealized_return_pct']):.2f}%"))
     else:
         rows.append(("行情估值", "现价不可用，未计算"))
@@ -90,9 +96,7 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
     save_path = Path(save_path)
     save_path.mkdir(parents=True, exist_ok=True)
     sections = []
-    position_section = render_account_position_section(
-        final_state.get("position_context")
-    )
+    position_section = render_account_position_section(final_state.get("position_context"))
     if position_section:
         sections.append(position_section)
 
@@ -105,7 +109,9 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
         analyst_parts.append(("Market Analyst", final_state["market_report"]))
     if final_state.get("sentiment_report"):
         analysts_dir.mkdir(exist_ok=True)
-        (analysts_dir / "sentiment.md").write_text(final_state["sentiment_report"], encoding="utf-8")
+        (analysts_dir / "sentiment.md").write_text(
+            final_state["sentiment_report"], encoding="utf-8"
+        )
         analyst_parts.append(("Sentiment Analyst", final_state["sentiment_report"]))
     if final_state.get("news_report"):
         analysts_dir.mkdir(exist_ok=True)
@@ -113,7 +119,9 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
         analyst_parts.append(("News Analyst", final_state["news_report"]))
     if final_state.get("fundamentals_report"):
         analysts_dir.mkdir(exist_ok=True)
-        (analysts_dir / "fundamentals.md").write_text(final_state["fundamentals_report"], encoding="utf-8")
+        (analysts_dir / "fundamentals.md").write_text(
+            final_state["fundamentals_report"], encoding="utf-8"
+        )
         analyst_parts.append(("Fundamentals Analyst", final_state["fundamentals_report"]))
     if analyst_parts:
         content = "\n\n".join(f"### {name}\n{text}" for name, text in analyst_parts)
@@ -156,8 +164,12 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
     if final_state.get("trader_investment_plan"):
         trading_dir = save_path / "3_trading"
         trading_dir.mkdir(exist_ok=True)
-        (trading_dir / "trader.md").write_text(final_state["trader_investment_plan"], encoding="utf-8")
-        sections.append(f"## III. Trading Team Plan\n\n### Trader\n{final_state['trader_investment_plan']}")
+        (trading_dir / "trader.md").write_text(
+            final_state["trader_investment_plan"], encoding="utf-8"
+        )
+        sections.append(
+            f"## III. Trading Team Plan\n\n### Trader\n{final_state['trader_investment_plan']}"
+        )
 
     # 4. Risk Management
     if final_state.get("risk_debate_state"):
@@ -170,7 +182,9 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
             risk_parts.append(("Aggressive Analyst", risk["aggressive_history"]))
         if risk.get("conservative_history"):
             risk_dir.mkdir(exist_ok=True)
-            (risk_dir / "conservative.md").write_text(risk["conservative_history"], encoding="utf-8")
+            (risk_dir / "conservative.md").write_text(
+                risk["conservative_history"], encoding="utf-8"
+            )
             risk_parts.append(("Conservative Analyst", risk["conservative_history"]))
         if risk.get("neutral_history"):
             risk_dir.mkdir(exist_ok=True)
@@ -185,7 +199,9 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
             portfolio_dir = save_path / "5_portfolio"
             portfolio_dir.mkdir(exist_ok=True)
             (portfolio_dir / "decision.md").write_text(risk["judge_decision"], encoding="utf-8")
-            sections.append(f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n{risk['judge_decision']}")
+            sections.append(
+                f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n{risk['judge_decision']}"
+            )
 
     # 6. Anti-bias audit
     researchability = final_state.get("researchability_assessment") or {}
@@ -194,6 +210,56 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
     if researchability or falsification or evidence_ledger:
         audit_dir = save_path / "6_audit"
         audit_dir.mkdir(exist_ok=True)
+        debate = final_state.get("investment_debate_state") or {}
+        risk_debate = final_state.get("risk_debate_state") or {}
+        replay_context = {
+            "version": 2,
+            "ticker": ticker,
+            "company_of_interest": final_state.get("company_of_interest") or ticker,
+            "asset_type": final_state.get("asset_type") or "stock",
+            "instrument_context": final_state.get("instrument_context") or "",
+            "trade_date": str(final_state.get("trade_date") or ""),
+            "analysis_mode": final_state.get("analysis_mode") or "full",
+            "investment_debate_state": {
+                key: debate.get(key, "" if key != "count" else 0)
+                for key in (
+                    "bull_history",
+                    "bear_history",
+                    "history",
+                    "current_response",
+                    "judge_decision",
+                    "count",
+                )
+            },
+            "risk_debate_state": {
+                key: risk_debate.get(key, "" if key != "count" else 0)
+                for key in (
+                    "aggressive_history",
+                    "conservative_history",
+                    "neutral_history",
+                    "history",
+                    "latest_speaker",
+                    "current_aggressive_response",
+                    "current_conservative_response",
+                    "current_neutral_response",
+                    "judge_decision",
+                    "count",
+                )
+            },
+            "investment_plan": final_state.get("investment_plan") or "",
+            "trader_investment_plan": final_state.get("trader_investment_plan") or "",
+            "position_context": final_state.get("position_context") or {},
+            "past_context": final_state.get("past_context") or "",
+            "current_market_snapshot": final_state.get("current_market_snapshot") or {},
+            "falsification_audit": final_state.get("falsification_audit") or {},
+            "blind_bull_argument": final_state.get("blind_bull_argument") or "",
+            "blind_bear_argument": final_state.get("blind_bear_argument") or "",
+            "stage_replay_contexts": final_state.get("stage_replay_contexts") or {},
+        }
+        (audit_dir / "replay_context.json").write_text(
+            json.dumps(replay_context, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         audit_parts = []
         if evidence_ledger.get("markdown"):
             (audit_dir / "evidence_ledger.md").write_text(
@@ -214,9 +280,7 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
             )
             audit_parts.append(researchability["markdown"])
         if falsification.get("markdown"):
-            (audit_dir / "falsification.md").write_text(
-                falsification["markdown"], encoding="utf-8"
-            )
+            (audit_dir / "falsification.md").write_text(falsification["markdown"], encoding="utf-8")
             audit_parts.append(falsification["markdown"])
         if final_state.get("initial_investment_plan"):
             (audit_dir / "research_manager_initial.md").write_text(
@@ -246,21 +310,33 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
         audit_payload = {
             "version": 2,
             "evidence_ledger": {
-                key: value for key, value in evidence_ledger.items()
-                if key != "markdown"
+                key: value for key, value in evidence_ledger.items() if key != "markdown"
             },
             "researchability": {
-                key: value for key, value in researchability.items()
-                if key != "markdown"
+                key: value for key, value in researchability.items() if key != "markdown"
             },
             "falsification": {
-                key: value for key, value in falsification.items()
-                if key != "markdown"
+                key: value for key, value in falsification.items() if key != "markdown"
             },
             "confidence": {
                 "data": confidence("Data"),
                 "thesis": confidence("Thesis"),
                 "execution": confidence("Execution"),
+            },
+            "performance_diagnostics": {
+                key: final_state.get(key) or {}
+                for key in (
+                    "evidence_ledger_builder_diagnostics",
+                    "bull_researcher_diagnostics",
+                    "bear_researcher_diagnostics",
+                    "research_manager_diagnostics",
+                    "falsification_auditor_diagnostics",
+                    "trader_diagnostics",
+                    "aggressive_analyst_diagnostics",
+                    "conservative_analyst_diagnostics",
+                    "neutral_analyst_diagnostics",
+                    "portfolio_manager_diagnostics",
+                )
             },
         }
         (audit_dir / "audit.json").write_text(
@@ -268,27 +344,29 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
             encoding="utf-8",
         )
         if audit_parts:
-            sections.append(
-                "## VI. Anti-Bias Audit\n\n" + "\n\n---\n\n".join(audit_parts)
-            )
+            sections.append("## VI. Anti-Bias Audit\n\n" + "\n\n---\n\n".join(audit_parts))
 
     decision_metadata = final_state.get("portfolio_decision_metadata") or {}
     if decision_metadata:
         calendar_nodes = list(decision_metadata.get("review_nodes") or [])
         if decision_metadata.get("execution_condition"):
-            calendar_nodes.append({
+            calendar_nodes.append(
+                {
                 "node_type": "execution",
                 "trigger_type": "condition",
                 "condition": decision_metadata["execution_condition"],
                 "action": decision_metadata.get("next_action") or "Review execution",
-            })
+                }
+            )
         if decision_metadata.get("risk_boundary"):
-            calendar_nodes.append({
+            calendar_nodes.append(
+                {
                 "node_type": "risk",
                 "trigger_type": "condition",
                 "condition": decision_metadata["risk_boundary"],
                 "action": decision_metadata["risk_boundary"],
-            })
+                }
+            )
         (save_path / "calendar_nodes.json").write_text(
             json.dumps(
                 {

@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import math
 import os
+import threading
 import time
 from datetime import datetime
+from glob import glob
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
@@ -27,6 +29,8 @@ _EM_KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 _EM_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 _EM_FIELDS1 = "f1,f2,f3,f4,f5,f6"
 _EM_FIELDS2 = "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61"
+_CACHE_LOCKS: dict[str, threading.Lock] = {}
+_CACHE_LOCKS_GUARD = threading.Lock()
 
 
 def _finite_float(value: Any) -> float | None:
@@ -161,32 +165,108 @@ def _eastmoney_cache_path(symbol: str, start_date: str, end_date: str) -> str:
     )
 
 
+def _eastmoney_cache_candidates(symbol: str, current_path: str) -> list[str]:
+    """Return prior date-window caches, newest first, excluding current_path."""
+    region = _eastmoney_region(symbol)
+    secid, _ = to_eastmoney_symbol(symbol, region)
+    cache_dir = os.path.dirname(current_path)
+    safe_symbol = safe_ticker_component(secid)
+    candidates = [
+        path
+        for path in glob(os.path.join(cache_dir, f"{safe_symbol}-EM-data-*-*.csv"))
+        if os.path.normcase(path) != os.path.normcase(current_path)
+    ]
+    return sorted(candidates, key=os.path.getmtime, reverse=True)
+
+
+def _read_usable_eastmoney_cache(
+    path: str,
+    symbol: str,
+    curr_date: str,
+) -> tuple[pd.DataFrame, pd.DataFrame] | None:
+    """Read a cache and return (full, date-filtered) frames when still fresh."""
+    try:
+        cached = pd.read_csv(path, on_bad_lines="skip", encoding="utf-8")
+        if cached.empty or "Close" not in cached.columns:
+            return None
+        full = _clean_dataframe(cached)
+        filtered = full[full["Date"] <= pd.to_datetime(curr_date)]
+        if filtered.empty:
+            return None
+        _assert_ohlcv_not_stale(filtered, curr_date, symbol, symbol)
+        return full, filtered
+    except (OSError, ValueError, NoMarketDataError) as exc:
+        logger.warning("Ignoring unusable Eastmoney cache %s: %s", path, exc)
+        return None
+
+
+def _write_eastmoney_cache(path: str, data: pd.DataFrame) -> None:
+    tmp_file = f"{path}.tmp"
+    data.to_csv(tmp_file, index=False, encoding="utf-8")
+    os.replace(tmp_file, path)
+
+
+def _eastmoney_cache_lock(path: str) -> threading.Lock:
+    normalized = os.path.normcase(os.path.abspath(path))
+    with _CACHE_LOCKS_GUARD:
+        return _CACHE_LOCKS.setdefault(normalized, threading.Lock())
+
+
+def _load_eastmoney_ohlcv_locked(
+    symbol: str,
+    curr_date: str,
+    start_str: str,
+    end_str: str,
+    data_file: str,
+) -> pd.DataFrame:
+    if os.path.exists(data_file):
+        current = _read_usable_eastmoney_cache(data_file, symbol, curr_date)
+        if current is not None:
+            return current[1]
+
+    fallback: tuple[pd.DataFrame, pd.DataFrame, str] | None = None
+    for candidate in _eastmoney_cache_candidates(symbol, data_file):
+        cached = _read_usable_eastmoney_cache(candidate, symbol, curr_date)
+        if cached is not None:
+            fallback = (*cached, candidate)
+            break
+
+    try:
+        downloaded = _download_eastmoney_ohlcv(symbol, start_str, end_str)
+        full = _clean_dataframe(downloaded)
+        filtered = full[full["Date"] <= pd.to_datetime(curr_date)]
+        _assert_ohlcv_not_stale(filtered, curr_date, symbol, symbol)
+        _write_eastmoney_cache(data_file, full)
+        return filtered
+    except NoMarketDataError as exc:
+        if fallback is None:
+            raise
+        full, filtered, candidate = fallback
+        _write_eastmoney_cache(data_file, full)
+        logger.warning(
+            "Eastmoney refresh failed for %s; using recent cache %s: %s",
+            symbol,
+            candidate,
+            exc,
+        )
+        return filtered
+
+
 def load_eastmoney_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
-    """Load five years of Eastmoney daily OHLCV up to today, then filter to curr_date."""
-    curr_date_dt = pd.to_datetime(curr_date)
+    """Load Eastmoney OHLCV, using a recent cache if today's refresh fails."""
     today_date = pd.Timestamp.today()
     start_date = today_date - pd.DateOffset(years=5)
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = today_date.strftime("%Y-%m-%d")
     data_file = _eastmoney_cache_path(symbol, start_str, end_str)
-
-    data = None
-    if os.path.exists(data_file):
-        cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
-        if not cached.empty and "Close" in cached.columns:
-            data = cached
-
-    if data is None:
-        downloaded = _download_eastmoney_ohlcv(symbol, start_str, end_str)
-        tmp_file = f"{data_file}.tmp"
-        downloaded.to_csv(tmp_file, index=False, encoding="utf-8")
-        os.replace(tmp_file, data_file)
-        data = downloaded
-
-    data = _clean_dataframe(data)
-    data = data[data["Date"] <= curr_date_dt]
-    _assert_ohlcv_not_stale(data, curr_date, symbol, symbol)
-    return data
+    with _eastmoney_cache_lock(data_file):
+        return _load_eastmoney_ohlcv_locked(
+            symbol,
+            curr_date,
+            start_str,
+            end_str,
+            data_file,
+        )
 
 
 def get_eastmoney_stock_data(
@@ -199,8 +279,7 @@ def get_eastmoney_stock_data(
     datetime.strptime(end_date, "%Y-%m-%d")
     data = load_eastmoney_ohlcv(symbol, end_date)
     data = data[
-        (data["Date"] >= pd.Timestamp(start_date))
-        & (data["Date"] <= pd.Timestamp(end_date))
+        (data["Date"] >= pd.Timestamp(start_date)) & (data["Date"] <= pd.Timestamp(end_date))
     ]
     if data.empty:
         raise NoMarketDataError(
@@ -209,9 +288,7 @@ def get_eastmoney_stock_data(
             f"Eastmoney returned no complete rows between {start_date} and {end_date}",
         )
     _assert_ohlcv_not_stale(data, end_date, symbol, symbol)
-    latest_valid_date = pd.to_datetime(data["Date"], errors="coerce").max().strftime(
-        "%Y-%m-%d"
-    )
+    latest_valid_date = pd.to_datetime(data["Date"], errors="coerce").max().strftime("%Y-%m-%d")
     header = f"# Stock data for {symbol.upper()} from {start_date} to {end_date}\n"
     header += "# Source: Eastmoney daily kline, forward-adjusted (qfq)\n"
     header += f"# Total records: {len(data)}\n"

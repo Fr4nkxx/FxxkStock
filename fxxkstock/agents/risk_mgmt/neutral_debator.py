@@ -2,6 +2,10 @@ from fxxkstock.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_report_instructions,
 )
+from fxxkstock.agents.utils.diagnostics import (
+    append_stage_replay_context,
+    invoke_plain_with_diagnostics,
+)
 
 
 def create_neutral_debator(llm):
@@ -36,7 +40,22 @@ Here is the current conversation history: {history} Here is the last response fr
 
 Engage actively by analyzing both sides critically, addressing weaknesses in the aggressive and conservative arguments to advocate for a more balanced approach. Challenge each of their points to illustrate why a moderate risk strategy might offer the best of both worlds, providing growth potential while safeguarding against extreme volatility. Focus on debating rather than simply presenting data, aiming to show that a balanced view can lead to the most reliable outcomes. Output conversationally as if you are speaking without any special formatting.""" + get_report_instructions()
 
-        response = llm.invoke(prompt)
+        sequence = risk_debate_state["count"] // 3 + 1
+        response, diagnostics = invoke_plain_with_diagnostics(
+            llm,
+            prompt,
+            "Neutral Analyst",
+            input_characters={
+                "instrument_context": len(instrument_context),
+                "risk_debate_history": len(history),
+                "trader_plan": len(trader_decision),
+                "market_report": len(market_research_report),
+                "sentiment_report": len(sentiment_report),
+                "news_report": len(news_report),
+                "fundamentals_report": len(fundamentals_report),
+            },
+            sequence=sequence,
+        )
 
         argument = f"Neutral Analyst: {response.content}"
 
@@ -46,14 +65,22 @@ Engage actively by analyzing both sides critically, addressing weaknesses in the
             "conservative_history": risk_debate_state.get("conservative_history", ""),
             "neutral_history": neutral_history + "\n" + argument,
             "latest_speaker": "Neutral",
-            "current_aggressive_response": risk_debate_state.get(
-                "current_aggressive_response", ""
+            "current_aggressive_response": risk_debate_state.get("current_aggressive_response", ""),
+            "current_conservative_response": risk_debate_state.get(
+                "current_conservative_response", ""
             ),
-            "current_conservative_response": risk_debate_state.get("current_conservative_response", ""),
             "current_neutral_response": argument,
             "count": risk_debate_state["count"] + 1,
         }
 
-        return {"risk_debate_state": new_risk_debate_state}
+        return {
+            "risk_debate_state": new_risk_debate_state,
+            "neutral_analyst_diagnostics": diagnostics,
+            "stage_replay_contexts": append_stage_replay_context(
+                state,
+                "neutral",
+                {"risk_debate_state": risk_debate_state},
+            ),
+        }
 
     return neutral_node

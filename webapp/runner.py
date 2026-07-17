@@ -21,6 +21,9 @@ from fxxkstock.agents.utils.structured import bind_structured
 from fxxkstock.dataflows.utils import safe_ticker_component
 from fxxkstock.default_config import DEFAULT_CONFIG
 from fxxkstock.graph.fxxkstock_graph import FxxKStockGraph
+from fxxkstock.llm_clients.capabilities import (
+    resolve_falsification_structured_method,
+)
 from fxxkstock.reporting import write_report_tree
 
 logger = logging.getLogger(__name__)
@@ -100,6 +103,13 @@ def build_run_config(params: RunParams) -> dict[str, Any]:
     config["quick_think_llm"] = params.quick_model
     config["deep_think_llm"] = params.deep_model
     config["checkpoint_enabled"] = False
+    effective_method = resolve_falsification_structured_method(
+        requested=config.get("falsification_structured_method"),
+        provider=config["llm_provider"],
+        model=config["deep_think_llm"],
+        backend_url=config.get("backend_url"),
+    )
+    config["falsification_structured_method_effective"] = effective_method or "provider_default"
     if params.chrome_platform:
         if params.chrome_platform not in {"macos", "windows", "ubuntu"}:
             raise ValueError("unsupported Chrome platform")
@@ -291,10 +301,7 @@ def _emit_parallel_initial_timings(
             {
                 "type": "parallel_initial_analysts_summary",
                 "total_seconds": round(total, 3),
-                "message": (
-                    "Parallel Initial Analysts total: "
-                    f"{_format_duration(total)}"
-                ),
+                "message": (f"Parallel Initial Analysts total: {_format_duration(total)}"),
             },
         )
 
@@ -323,20 +330,70 @@ def _emit_parallel_initial_timings(
     return True
 
 
+def _emit_parallel_blind_timings(
+    state: RunState,
+    chunk: dict[str, Any],
+) -> bool:
+    timings = chunk.get("parallel_blind_researcher_timings")
+    if not isinstance(timings, list) or not timings:
+        return False
+
+    total_seconds = chunk.get("parallel_blind_researchers_total_seconds")
+    total = float(total_seconds) if isinstance(total_seconds, (int, float)) else None
+    if total is not None:
+        _emit(
+            state,
+            {
+                "type": "parallel_blind_researchers_summary",
+                "total_seconds": round(total, 3),
+                "message": (f"Parallel Blind Researchers total: {_format_duration(total)}"),
+            },
+        )
+
+    for item in timings:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or item.get("key") or "Blind Researcher")
+        duration = float(item.get("duration_seconds") or 0.0)
+        _emit(
+            state,
+            {
+                "type": "parallel_blind_researcher_timing",
+                "label": label,
+                "key": item.get("key"),
+                "duration_seconds": round(duration, 3),
+                "message": f"{label}: {_format_duration(duration)}",
+            },
+        )
+    return True
+
+
 def _emit_agent_model_diagnostics(
     state: RunState,
     chunk: dict[str, Any],
     seen: set[str],
 ) -> None:
     diagnostic_fields = {
+        "evidence_ledger_builder_diagnostics": "Evidence Ledger Builder",
+        "bull_researcher_diagnostics": "Bull Researcher",
+        "bear_researcher_diagnostics": "Bear Researcher",
         "research_manager_diagnostics": "Research Manager",
         "falsification_auditor_diagnostics": "Falsification Auditor",
+        "trader_diagnostics": "Trader",
+        "aggressive_analyst_diagnostics": "Aggressive Analyst",
+        "conservative_analyst_diagnostics": "Conservative Analyst",
+        "neutral_analyst_diagnostics": "Neutral Analyst",
+        "portfolio_manager_diagnostics": "Portfolio Manager",
     }
     for field_name, default_label in diagnostic_fields.items():
         payload = chunk.get(field_name)
-        if field_name in seen or not isinstance(payload, dict):
+        if not isinstance(payload, dict):
             continue
-        seen.add(field_name)
+        sequence = int(payload.get("sequence") or 1)
+        diagnostic_id = f"{field_name}:{sequence}"
+        if diagnostic_id in seen:
+            continue
+        seen.add(diagnostic_id)
 
         label = str(payload.get("agent") or default_label)
         input_sizes = payload.get("input_characters") or {}
@@ -349,8 +406,32 @@ def _emit_agent_model_diagnostics(
             f"app_attempts={attempts}; model_time={_format_duration(total_duration)}; "
             f"fallback={'yes' if fallback_used else 'no'}"
         )
-        if fallback_used and payload.get("fallback_reason"):
-            message += f" ({payload['fallback_reason']})"
+        structured_method = str(payload.get("structured_method") or "").strip()
+        if structured_method:
+            message += f"; method={structured_method}"
+        if sequence > 1:
+            message += f"; round={sequence}"
+        structured_duration = float(payload.get("structured_duration_seconds") or 0.0)
+        fallback_duration = float(payload.get("fallback_duration_seconds") or 0.0)
+        if payload.get("structured_attempts"):
+            message += f"; structured={_format_duration(structured_duration)}"
+        if payload.get("raw_response_available"):
+            message += f"; raw_content={int(payload.get('raw_content_characters') or 0):,} chars"
+        if fallback_used:
+            if payload.get("raw_output_reused"):
+                message += "; fallback=reused first response"
+            elif payload.get("fallback_attempts"):
+                message += f"; fallback_time={_format_duration(fallback_duration)}"
+            if payload.get("fallback_reason"):
+                message += f" ({payload['fallback_reason']})"
+            if payload.get("fallback_error"):
+                error = str(payload["fallback_error"]).strip()
+                message += f": {error[:200]}"
+        elif payload.get("model_error"):
+            error = str(payload["model_error"]).strip()
+            message += f"; error={error[:200]}"
+        if payload.get("correction_attempted"):
+            message += "; price_correction=yes"
 
         _emit(
             state,
@@ -382,8 +463,7 @@ def _write_debug_log(state: RunState) -> None:
     path = Path("logs") / "web_runs" / f"{state.run_id}.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        json.dumps(_redact_debug_value(event), ensure_ascii=False)
-        for event in state.debug_events
+        json.dumps(_redact_debug_value(event), ensure_ascii=False) for event in state.debug_events
     ]
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
     state.debug_log_path = path
@@ -530,18 +610,10 @@ def _detect_report_sections(chunk: dict[str, Any], seen: set[str]) -> list[tuple
     blind_bear = str(chunk.get("blind_bear_argument") or "").strip()
     bull_history = str(debate.get("bull_history") or "").strip()
     bear_history = str(debate.get("bear_history") or "").strip()
-    if (
-        bull_history
-        and bull_history != blind_bull
-        and "investment_bull" not in seen
-    ):
+    if bull_history and bull_history != blind_bull and "investment_bull" not in seen:
         seen.add("investment_bull")
         found.append(("investment_bull", "Bull Researcher"))
-    if (
-        bear_history
-        and bear_history != blind_bear
-        and "investment_bear" not in seen
-    ):
+    if bear_history and bear_history != blind_bear and "investment_bear" not in seen:
         seen.add("investment_bear")
         found.append(("investment_bear", "Bear Researcher"))
     if debate.get("judge_decision") and "research_manager" not in seen:
@@ -616,11 +688,22 @@ def run_analysis(state: RunState, params: RunParams) -> None:
             state,
             {
                 "type": "run_config",
-                "parallel_initial_analysts": bool(
-                    config.get("parallel_initial_analysts", False)
-                ),
+                "parallel_initial_analysts": bool(config.get("parallel_initial_analysts", False)),
                 "parallel_initial_analyst_workers": int(
                     config.get("parallel_initial_analyst_workers", 4)
+                ),
+                "parallel_blind_researchers": bool(config.get("parallel_blind_researchers", False)),
+                "falsification_structured_method": str(
+                    config.get(
+                        "falsification_structured_method",
+                        "provider_default",
+                    )
+                ),
+                "falsification_structured_method_effective": str(
+                    config.get(
+                        "falsification_structured_method_effective",
+                        "provider_default",
+                    )
                 ),
                 "analysts": analysts,
                 "analysis_mode": params.analysis_mode,
@@ -632,7 +715,13 @@ def run_analysis(state: RunState, params: RunParams) -> None:
                     "parallel_initial_analysts="
                     f"{bool(config.get('parallel_initial_analysts', False))}; "
                     "workers="
-                    f"{int(config.get('parallel_initial_analyst_workers', 4))}"
+                    f"{int(config.get('parallel_initial_analyst_workers', 4))}; "
+                    "parallel_blind_researchers="
+                    f"{bool(config.get('parallel_blind_researchers', False))}; "
+                    "falsification_structured_method="
+                    f"{config.get('falsification_structured_method', 'provider_default')}"
+                    "->"
+                    f"{config.get('falsification_structured_method_effective', 'provider_default')}"
                 ),
             },
         )
@@ -670,6 +759,7 @@ def run_analysis(state: RunState, params: RunParams) -> None:
         seen_sections: set[str] = set()
         seen_agent_diagnostics: set[str] = set()
         parallel_initial_timings_emitted = False
+        parallel_blind_timings_emitted = False
 
         for chunk in graph.graph.stream(init_agent_state, **args):
             trace.append(chunk)
@@ -681,6 +771,11 @@ def run_analysis(state: RunState, params: RunParams) -> None:
                     chunk,
                 )
 
+            parallel_blind_chunk = False
+            if not parallel_blind_timings_emitted:
+                parallel_blind_chunk = _emit_parallel_blind_timings(state, chunk)
+                parallel_blind_timings_emitted = parallel_blind_chunk
+
             for section_key, label in _detect_report_sections(chunk, seen_sections):
                 _emit(
                     state,
@@ -691,7 +786,11 @@ def run_analysis(state: RunState, params: RunParams) -> None:
                     },
                 )
                 _emit(state, {"type": "status", "message": f"{label} completed"})
-                emit_interval(label, "stage")
+                if not (parallel_blind_chunk and section_key in {"blind_bull", "blind_bear"}):
+                    emit_interval(label, "stage")
+
+            if parallel_blind_chunk:
+                emit_interval("Parallel Blind Researchers", "stage")
 
             _emit_agent_model_diagnostics(
                 state,

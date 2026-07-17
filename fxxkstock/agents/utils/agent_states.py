@@ -109,6 +109,14 @@ class AgentState(MessagesState):
         float,
         "Observed total wall-clock time for the experimental parallel initial analyst node",
     ]
+    parallel_blind_researcher_timings: Annotated[
+        list[dict[str, Any]],
+        "Per-agent timings for parallel Blind Bull and Blind Bear execution",
+    ]
+    parallel_blind_researchers_total_seconds: Annotated[
+        float,
+        "Wall-clock time for parallel Blind Bull and Blind Bear execution",
+    ]
     research_manager_diagnostics: Annotated[
         dict[str, Any],
         "Non-content model-call diagnostics for the Research Manager",
@@ -116,4 +124,16 @@ class AgentState(MessagesState):
     falsification_auditor_diagnostics: Annotated[
         dict[str, Any],
         "Non-content model-call diagnostics for the Falsification Auditor",
+    ]
+    evidence_ledger_builder_diagnostics: Annotated[dict[str, Any], "Evidence ledger diagnostics"]
+    bull_researcher_diagnostics: Annotated[dict[str, Any], "Bull researcher diagnostics"]
+    bear_researcher_diagnostics: Annotated[dict[str, Any], "Bear researcher diagnostics"]
+    trader_diagnostics: Annotated[dict[str, Any], "Trader diagnostics"]
+    aggressive_analyst_diagnostics: Annotated[dict[str, Any], "Aggressive analyst diagnostics"]
+    conservative_analyst_diagnostics: Annotated[dict[str, Any], "Conservative analyst diagnostics"]
+    neutral_analyst_diagnostics: Annotated[dict[str, Any], "Neutral analyst diagnostics"]
+    portfolio_manager_diagnostics: Annotated[dict[str, Any], "Portfolio manager diagnostics"]
+    stage_replay_contexts: Annotated[
+        dict[str, list[dict[str, Any]]],
+        "Pre-call state slices used only by local stage replay diagnostics",
     ]

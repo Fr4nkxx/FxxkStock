@@ -27,7 +27,13 @@ def test_no_env_uses_built_in_defaults(monkeypatch):
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is False
     assert dc.DEFAULT_CONFIG["cn_market_data_source"] == "yfinance"
+    assert dc.DEFAULT_CONFIG["cn_browser_mode"] == "background"
     assert dc.DEFAULT_CONFIG["parallel_initial_analysts"] is True
+    assert dc.DEFAULT_CONFIG["parallel_blind_researchers"] is True
+    assert (
+        dc.DEFAULT_CONFIG["falsification_structured_method"]
+        == "provider_default"
+    )
 
 
 def test_string_overrides(monkeypatch):
@@ -38,12 +44,14 @@ def test_string_overrides(monkeypatch):
         FXXKSTOCK_QUICK_THINK_LLM="gemini-3-flash-preview",
         FXXKSTOCK_LLM_BACKEND_URL="https://example.invalid/v1",
         FXXKSTOCK_OUTPUT_LANGUAGE="Chinese",
+        FXXKSTOCK_CHROME_MODE="headless",
     )
     assert dc.DEFAULT_CONFIG["llm_provider"] == "google"
     assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gemini-3-pro-preview"
     assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gemini-3-flash-preview"
     assert dc.DEFAULT_CONFIG["backend_url"] == "https://example.invalid/v1"
     assert dc.DEFAULT_CONFIG["output_language"] == "Chinese"
+    assert dc.DEFAULT_CONFIG["cn_browser_mode"] == "headless"
 
 
 def test_int_coercion(monkeypatch):
@@ -99,6 +107,22 @@ def test_parallel_initial_analyst_overrides(monkeypatch):
     )
     assert dc.DEFAULT_CONFIG["parallel_initial_analysts"] is False
     assert dc.DEFAULT_CONFIG["parallel_initial_analyst_workers"] == 2
+
+
+def test_parallel_blind_researcher_override(monkeypatch):
+    dc = _reload_with_env(
+        monkeypatch,
+        FXXKSTOCK_PARALLEL_BLIND_RESEARCHERS="true",
+    )
+    assert dc.DEFAULT_CONFIG["parallel_blind_researchers"] is True
+
+
+def test_falsification_structured_method_override(monkeypatch):
+    dc = _reload_with_env(
+        monkeypatch,
+        FXXKSTOCK_FALSIFICATION_STRUCTURED_METHOD="auto",
+    )
+    assert dc.DEFAULT_CONFIG["falsification_structured_method"] == "auto"
 
 
 def test_reasoning_effort_defaults_to_none(monkeypatch):

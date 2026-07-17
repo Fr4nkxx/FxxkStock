@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date
+import os
+from datetime import date, timedelta
 
 import pandas as pd
 import pytest
@@ -118,3 +119,66 @@ def test_load_ohlcv_preserves_yfinance_path_by_default(monkeypatch, tmp_path):
 
     with pytest.raises(NoMarketDataError, match="Yahoo Finance returned no rows"):
         stockstats_utils.load_ohlcv("002364.SZ", today)
+
+
+@pytest.mark.unit
+def test_eastmoney_refresh_failure_promotes_recent_cache(monkeypatch, tmp_path):
+    from fxxkstock.dataflows import eastmoney_market
+
+    set_config({"data_cache_dir": str(tmp_path)})
+    today = date.today()
+    previous_day = today - timedelta(days=1)
+    cache_dir = tmp_path / "eastmoney_ohlcv"
+    cache_dir.mkdir()
+    legacy_cache = cache_dir / (
+        "1.600353-EM-data-2021-07-13-2026-07-13.csv"
+    )
+    pd.DataFrame(
+        {
+            "Date": [previous_day.isoformat()],
+            "Open": [43.04],
+            "High": [45.23],
+            "Low": [41.2],
+            "Close": [41.27],
+            "Volume": [227080],
+        }
+    ).to_csv(legacy_cache, index=False)
+
+    calls = 0
+
+    def fail_refresh(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise NoMarketDataError("600353.SS", "1.600353", "proxy unavailable")
+
+    monkeypatch.setattr(
+        eastmoney_market,
+        "_download_eastmoney_ohlcv",
+        fail_refresh,
+    )
+
+    data = eastmoney_market.load_eastmoney_ohlcv(
+        "600353.SS",
+        today.isoformat(),
+    )
+
+    assert calls == 1
+    assert data["Close"].iloc[-1] == 41.27
+    start = (pd.Timestamp.today() - pd.DateOffset(years=5)).strftime("%Y-%m-%d")
+    current_cache = eastmoney_market._eastmoney_cache_path(
+        "600353.SS",
+        start,
+        pd.Timestamp.today().strftime("%Y-%m-%d"),
+    )
+    assert os.path.exists(current_cache)
+
+    monkeypatch.setattr(
+        eastmoney_market,
+        "_download_eastmoney_ohlcv",
+        lambda *args, **kwargs: pytest.fail("promoted cache should avoid a retry"),
+    )
+    second = eastmoney_market.load_eastmoney_ohlcv(
+        "600353.SS",
+        today.isoformat(),
+    )
+    assert second["Close"].iloc[-1] == 41.27

@@ -22,10 +22,12 @@ from webapp.runner import (
     RunParams,
     RunState,
     _detect_report_sections,
+    _emit_agent_model_diagnostics,
+    _emit_parallel_blind_timings,
     build_run_config,
     run_analysis,
 )
-from webapp.server import RUNS, RunRequest, app
+from webapp.server import RUNS, RunRequest, app, main
 
 
 @pytest.mark.unit
@@ -44,6 +46,122 @@ def test_build_run_config_mode_mapping():
         assert cfg["max_risk_discuss_rounds"] == depth
         assert cfg["llm_provider"] == "deepseek"
         assert cfg["output_language"] == "Chinese"
+
+
+@pytest.mark.unit
+def test_web_server_defaults_to_loopback(monkeypatch):
+    import uvicorn
+
+    captured = {}
+    monkeypatch.delenv("FXXKSTOCK_WEB_HOST", raising=False)
+    monkeypatch.setattr(
+        uvicorn,
+        "run",
+        lambda app_ref, **kwargs: captured.update({"app_ref": app_ref, **kwargs}),
+    )
+
+    main()
+
+    assert captured["app_ref"] == "webapp.server:app"
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 8000
+
+
+@pytest.mark.unit
+def test_agent_diagnostics_describe_reused_raw_response():
+    state = RunState(run_id="test-run", ticker="600353.SS")
+    _emit_agent_model_diagnostics(
+        state,
+        {
+            "falsification_auditor_diagnostics": {
+                "agent": "Falsification Auditor",
+                "input_characters": {"prompt": 45403},
+                "structured_attempts": 1,
+                "structured_duration_seconds": 132.0,
+                "fallback_attempts": 0,
+                "fallback_duration_seconds": 0.0,
+                "fallback_used": True,
+                "structured_method": "json_mode",
+                "raw_output_reused": True,
+                "raw_response_available": True,
+                "raw_content_characters": 7928,
+                "fallback_reason": "structured_output_unparsed",
+                "fallback_error": "tool call missing",
+                "model_attempts": 1,
+                "total_model_duration_seconds": 132.0,
+            }
+        },
+        set(),
+    )
+
+    message = state.debug_events[0]["message"]
+    assert "app_attempts=1" in message
+    assert "method=json_mode" in message
+    assert "structured=2:12" in message
+    assert "raw_content=7,928 chars" in message
+    assert "fallback=reused first response" in message
+    assert "tool call missing" in message
+
+
+@pytest.mark.unit
+def test_agent_diagnostics_emit_each_debate_round_once():
+    state = RunState(run_id="test-run", ticker="600353.SS")
+    seen = set()
+    first = {
+        "bull_researcher_diagnostics": {
+            "agent": "Bull Researcher",
+            "sequence": 1,
+            "input_characters": {"prompt": 1200},
+            "model_attempts": 1,
+            "total_model_duration_seconds": 10,
+            "fallback_used": False,
+        }
+    }
+    second = {
+        "bull_researcher_diagnostics": {
+            **first["bull_researcher_diagnostics"],
+            "sequence": 2,
+        }
+    }
+
+    _emit_agent_model_diagnostics(state, first, seen)
+    _emit_agent_model_diagnostics(state, first, seen)
+    _emit_agent_model_diagnostics(state, second, seen)
+
+    assert len(state.debug_events) == 2
+    assert "round=2" in state.debug_events[1]["message"]
+
+
+@pytest.mark.unit
+def test_parallel_blind_timings_are_emitted():
+    state = RunState(run_id="test-run", ticker="600353.SS")
+
+    emitted = _emit_parallel_blind_timings(
+        state,
+        {
+            "parallel_blind_researchers_total_seconds": 72.5,
+            "parallel_blind_researcher_timings": [
+                {
+                    "key": "blind_bull",
+                    "label": "Blind Bull",
+                    "duration_seconds": 68.0,
+                },
+                {
+                    "key": "blind_bear",
+                    "label": "Blind Bear",
+                    "duration_seconds": 72.4,
+                },
+            ],
+        },
+    )
+
+    assert emitted is True
+    assert [event["type"] for event in state.debug_events] == [
+        "parallel_blind_researchers_summary",
+        "parallel_blind_researcher_timing",
+        "parallel_blind_researcher_timing",
+    ]
+    assert state.debug_events[0]["message"].endswith("1:12")
 
 
 @pytest.mark.unit
@@ -225,6 +343,20 @@ def test_run_events_and_report_flow(tmp_path):
         run_config = next(e for e in events if e.get("type") == "run_config")
         assert isinstance(run_config["parallel_initial_analysts"], bool)
         assert isinstance(run_config["parallel_initial_analyst_workers"], int)
+        assert isinstance(run_config["parallel_blind_researchers"], bool)
+        assert run_config["falsification_structured_method"] in {
+            "auto",
+            "provider_default",
+            "function_calling",
+            "json_mode",
+            "json_schema",
+        }
+        assert run_config["falsification_structured_method_effective"] in {
+            "provider_default",
+            "function_calling",
+            "json_mode",
+            "json_schema",
+        }
         summary = next(e for e in events if e.get("type") == "timing_summary")
         assert summary["status"] == "done"
         assert summary["total_seconds"] >= 0
@@ -283,10 +415,13 @@ def test_blind_and_debate_sections_have_distinct_timing_labels():
     )
     assert third == [("investment_bull", "Bull Researcher")]
 
+
 @pytest.mark.unit
 def test_memory_status_api():
     client = TestClient(app)
-    with patch("webapp.server.TickerMemoryStore.status", return_value={
+    with patch(
+        "webapp.server.TickerMemoryStore.status",
+        return_value={
         "ticker": "600353.SS",
         "has_memory": True,
         "analysis_count": 2,
@@ -294,7 +429,8 @@ def test_memory_status_api():
         "updated_at": "2026-06-27T10:00:00Z",
         "reuse": ["fundamentals"],
         "refresh": ["market", "social", "news"],
-    }):
+        },
+    ):
         res = client.get("/api/memory/600353.SS?trade_date=2026-06-28")
     assert res.status_code == 200
     assert res.json()["reuse"] == ["fundamentals"]
@@ -329,13 +465,16 @@ def test_run_request_position_is_optional_and_validated():
 @pytest.mark.unit
 def test_browser_status_api():
     client = TestClient(app)
-    with patch("webapp.server.ChromeManager.status", return_value={
+    with patch(
+        "webapp.server.ChromeManager.status",
+        return_value={
         "available": True,
         "platform": "macos",
         "managed": True,
         "managed_platform": "macos",
         "cdp_url": "http://127.0.0.1:9222",
-    }):
+        },
+    ):
         res = client.get("/api/browser/status?platform=macos")
     assert res.status_code == 200
     assert res.json()["managed"] is True
@@ -485,6 +624,8 @@ def test_report_index_rebuilds_when_report_set_changes(tmp_path):
 
     items = history.list_historical_reports(tmp_path)
     assert {item["ticker"] for item in items} == {"600353.SS", "159516.SZ"}
+
+
 def test_nested_report_layout_is_listed_and_read(tmp_path):
     report_dir = tmp_path / "600353.SS" / "20260628_091530"
     report_dir.mkdir(parents=True)
@@ -559,7 +700,9 @@ def test_legacy_review_trigger_is_backfilled_into_calendar_nodes(tmp_path):
     dated = [item for item in nodes if item.get("trigger_type") == "date"]
     events = [item for item in nodes if item.get("trigger_type") == "event"]
     assert sorted(item["calendar_date"] for item in dated) == [
-        "2026-07-13", "2026-07-16", "2026-07-17"
+        "2026-07-13",
+        "2026-07-16",
+        "2026-07-17",
     ]
     assert all(item["calendar_date"] != "2026-02-08" for item in dated)
     deadline = next(item for item in dated if item["calendar_date"] == "2026-07-16")
@@ -585,8 +728,7 @@ def test_historical_report_decision_prefers_portfolio_decision(tmp_path):
         encoding="utf-8",
     )
     (decision_dir / "decision.md").write_text(
-        "**Rating**: Hold\n\n"
-        "**Executive Summary**: 账户FLAT空仓不变，继续场外观望。",
+        "**Rating**: Hold\n\n**Executive Summary**: 账户FLAT空仓不变，继续场外观望。",
         encoding="utf-8",
     )
 
@@ -606,7 +748,10 @@ def test_api_report_history(tmp_path):
     report_dir.mkdir()
     (report_dir / "complete_report.md").write_text("# Report\n\nHOLD", encoding="utf-8")
 
-    with patch("webapp.server.list_historical_reports", return_value=[{
+    with patch(
+        "webapp.server.list_historical_reports",
+        return_value=[
+            {
         "id": "600353.SS_20260627_141703",
         "ticker": "600353.SS",
         "created_at": "2026-06-27T14:17:03",
@@ -614,61 +759,80 @@ def test_api_report_history(tmp_path):
         "decision": "HOLD",
         "report_dir": str(report_dir),
         "modified_at": 1,
-    }]):
+            }
+        ],
+    ):
         client = TestClient(app)
         res = client.get("/api/reports/history")
         assert res.status_code == 200
         assert len(res.json()["reports"]) == 1
 
-    with patch("webapp.server.get_historical_report", return_value={
+    with patch(
+        "webapp.server.get_historical_report",
+        return_value={
         "id": "600353.SS_20260627_141703",
         "available": True,
         "ticker": "600353.SS",
         "markdown": "# Report\n\nHOLD",
         "decision": "HOLD",
-    }):
+        },
+    ):
         detail = client.get("/api/reports/history/600353.SS_20260627_141703")
         assert detail.status_code == 200
         assert detail.json()["markdown"].startswith("# Report")
 
-    with patch("webapp.server.get_historical_report", return_value={
+    with patch(
+        "webapp.server.get_historical_report",
+        return_value={
         "id": "600353.SS/20260628_091530",
         "available": True,
         "ticker": "600353.SS",
         "markdown": "# Nested Report\n\nHOLD",
         "decision": "HOLD",
-    }) as nested_loader:
+        },
+    ) as nested_loader:
         detail = client.get("/api/reports/history/600353.SS/20260628_091530")
         assert detail.status_code == 200
         nested_loader.assert_called_once_with("600353.SS/20260628_091530")
 
-    with patch("webapp.server.delete_historical_report", return_value={
+    with patch(
+        "webapp.server.delete_historical_report",
+        return_value={
         "deleted": True,
         "report_id": "600353.SS/20260628_091530",
-    }) as report_deleter:
+        },
+    ) as report_deleter:
         deleted = client.delete("/api/reports/history/600353.SS/20260628_091530")
         assert deleted.status_code == 200
         report_deleter.assert_called_once_with("600353.SS/20260628_091530")
 
     RUNS.clear()
-    with patch("webapp.server.delete_stock_reports", return_value={
+    with patch(
+        "webapp.server.delete_stock_reports",
+        return_value={
         "deleted": True,
         "ticker": "600353.SS",
         "reports_deleted": 2,
-    }) as stock_deleter:
+        },
+    ) as stock_deleter:
         deleted = client.delete("/api/stocks/600353.SS")
         assert deleted.status_code == 200
         assert deleted.json()["reports_deleted"] == 2
         stock_deleter.assert_called_once_with("600353.SS")
 
-    with patch("webapp.server.list_calendar_nodes", return_value=[{
+    with patch(
+        "webapp.server.list_calendar_nodes",
+        return_value=[
+            {
         "id": "159819.SZ/20260711_120000#0",
         "ticker": "159819.SZ",
         "node_type": "review",
         "trigger_type": "date",
         "calendar_date": "2026-07-13",
         "action": "执行FC01证伪测试",
-    }]):
+            }
+        ],
+    ):
         nodes = client.get("/api/calendar/nodes")
         assert nodes.status_code == 200
         assert nodes.json()["nodes"][0]["calendar_date"] == "2026-07-13"
@@ -702,20 +866,31 @@ def test_stock_reports_limit_applies_after_ticker_filter(tmp_path):
 def test_split_stock_overview_endpoints():
     client = TestClient(app)
     with (
-        patch("webapp.server.get_stock_quote", return_value={
+        patch(
+            "webapp.server.get_stock_quote",
+            return_value={
             "ticker": "600353.SS",
             "name": "Test",
             "quote": {"last_price": 10.5},
-        }) as quote,
-        patch("webapp.server.get_stock_chart", return_value={
+            },
+        ) as quote,
+        patch(
+            "webapp.server.get_stock_chart",
+            return_value={
             "ticker": "600353.SS",
             "chart_range": "1d",
             "chart": [{"time": "2026-01-01", "close": 10.5}],
-        }) as chart,
-        patch("webapp.server.get_stock_reports", return_value=[{
+            },
+        ) as chart,
+        patch(
+            "webapp.server.get_stock_reports",
+            return_value=[
+                {
             "id": "600353.SS_20260627_141703",
             "ticker": "600353.SS",
-        }]) as reports,
+                }
+            ],
+        ) as reports,
     ):
         quote_res = client.get("/api/stocks/600353.SS/quote")
         chart_res = client.get("/api/stocks/600353.SS/chart?range=1d")
@@ -747,11 +922,14 @@ def test_stock_overview_groups_reports_and_calculates_change(tmp_path):
     from webapp.history import get_stock_overview
 
     with (
-        patch("webapp.history.resolve_instrument_identity", return_value={
+        patch(
+            "webapp.history.resolve_instrument_identity",
+            return_value={
             "company_name": "Test Company",
             "exchange": "SSE",
             "currency": "CNY",
-        }),
+            },
+        ),
         patch("webapp.history.detect_market_region", return_value="default"),
         patch("webapp.history.yf.Ticker") as ticker,
     ):
@@ -892,14 +1070,16 @@ def test_stock_chart_uses_eastmoney_for_cn_symbol(monkeypatch):
     history._chart_cache.clear()
     previous_config = dataflow_config.get_config()
     dataflow_config.set_config({"cn_market_data_source": "eastmoney"})
-    frame = pd.DataFrame({
+    frame = pd.DataFrame(
+        {
         "Date": pd.to_datetime(["2026-07-03", "2026-07-06"]),
         "Open": [51.15, 53.42],
         "High": [55.94, 56.66],
         "Low": [51.15, 53.0],
         "Close": [52.9, 54.19],
         "Volume": [564257, 482928],
-    })
+        }
+    )
 
     def fail_yfinance(*args, **kwargs):
         raise AssertionError("CN chart should use Eastmoney before yfinance")
@@ -930,7 +1110,8 @@ def test_stock_quote_uses_eastmoney_daily_when_latest_quote_unavailable(monkeypa
     history._quote_cache.clear()
     previous_config = dataflow_config.get_config()
     dataflow_config.set_config({"cn_market_data_source": "eastmoney"})
-    frame = pd.DataFrame({
+    frame = pd.DataFrame(
+        {
         "Date": pd.to_datetime(["2026-07-03", "2026-07-06"]),
         "Open": [51.15, 53.42],
         "High": [55.94, 56.66],
@@ -938,7 +1119,8 @@ def test_stock_quote_uses_eastmoney_daily_when_latest_quote_unavailable(monkeypa
         "Close": [52.9, 54.19],
         "Volume": [564257, 482928],
         "Amount": [30000000.0, 2661689093.46],
-    })
+        }
+    )
 
     def fail_yfinance(*args, **kwargs):
         raise AssertionError("CN quote should use Eastmoney daily before yfinance")
@@ -1003,11 +1185,14 @@ def test_stock_overview_uses_daily_bar_for_quote_cards(tmp_path):
 
     history._overview_cache.clear()
     with (
-        patch("webapp.history.resolve_instrument_identity", return_value={
+        patch(
+            "webapp.history.resolve_instrument_identity",
+            return_value={
             "company_name": "利通电子",
             "exchange": "SHH",
             "currency": "CNY",
-        }),
+            },
+        ),
         patch("webapp.history.detect_market_region", return_value="default"),
         patch("webapp.history.yf.Ticker") as ticker,
     ):

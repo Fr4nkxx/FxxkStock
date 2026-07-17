@@ -2,6 +2,10 @@ from fxxkstock.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_report_instructions,
 )
+from fxxkstock.agents.utils.diagnostics import (
+    append_stage_replay_context,
+    invoke_plain_with_diagnostics,
+)
 
 
 def create_bull_researcher(llm):
@@ -15,9 +19,7 @@ def create_bull_researcher(llm):
         sentiment_report = state["sentiment_report"]
         news_report = state["news_report"]
         fundamentals_report = state["fundamentals_report"]
-        researchability = (state.get("researchability_assessment") or {}).get(
-            "markdown", ""
-        )
+        researchability = (state.get("researchability_assessment") or {}).get("markdown", "")
         evidence_ledger = (state.get("evidence_ledger") or {}).get("markdown", "")
         instrument_context = get_instrument_context_from_state(state)
         asset_type = state.get("asset_type", "stock")
@@ -52,7 +54,23 @@ Last bear argument: {current_response}
 Use this information to deliver a compelling bull argument, refute the bear's concerns, and engage in a dynamic debate that demonstrates the strengths of the bull position.
 """ + get_report_instructions()
 
-        response = llm.invoke(prompt)
+        sequence = investment_debate_state["count"] // 2 + 1
+        response, diagnostics = invoke_plain_with_diagnostics(
+            llm,
+            prompt,
+            "Bull Researcher",
+            input_characters={
+                "instrument_context": len(instrument_context),
+                "debate_history": len(history),
+                "market_report": len(market_research_report),
+                "sentiment_report": len(sentiment_report),
+                "news_report": len(news_report),
+                "fundamentals_report": len(fundamentals_report),
+                "researchability": len(researchability),
+                "evidence_ledger": len(evidence_ledger),
+            },
+            sequence=sequence,
+        )
 
         argument = f"Bull Analyst: {response.content}"
 
@@ -64,6 +82,14 @@ Use this information to deliver a compelling bull argument, refute the bear's co
             "count": investment_debate_state["count"] + 1,
         }
 
-        return {"investment_debate_state": new_investment_debate_state}
+        return {
+            "investment_debate_state": new_investment_debate_state,
+            "bull_researcher_diagnostics": diagnostics,
+            "stage_replay_contexts": append_stage_replay_context(
+                state,
+                "bull",
+                {"investment_debate_state": investment_debate_state},
+            ),
+        }
 
     return bull_node

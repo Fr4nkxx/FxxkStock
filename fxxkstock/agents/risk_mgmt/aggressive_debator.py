@@ -2,6 +2,10 @@ from fxxkstock.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_report_instructions,
 )
+from fxxkstock.agents.utils.diagnostics import (
+    append_stage_replay_context,
+    invoke_plain_with_diagnostics,
+)
 
 
 def create_aggressive_debator(llm):
@@ -36,7 +40,22 @@ Here is the current conversation history: {history} Here are the last arguments 
 
 Engage actively by addressing any specific concerns raised, refuting the weaknesses in their logic, and asserting the benefits of risk-taking to outpace market norms. Maintain a focus on debating and persuading, not just presenting data. Challenge each counterpoint to underscore why a high-risk approach is optimal. Output conversationally as if you are speaking without any special formatting.""" + get_report_instructions()
 
-        response = llm.invoke(prompt)
+        sequence = risk_debate_state["count"] // 3 + 1
+        response, diagnostics = invoke_plain_with_diagnostics(
+            llm,
+            prompt,
+            "Aggressive Analyst",
+            input_characters={
+                "instrument_context": len(instrument_context),
+                "risk_debate_history": len(history),
+                "trader_plan": len(trader_decision),
+                "market_report": len(market_research_report),
+                "sentiment_report": len(sentiment_report),
+                "news_report": len(news_report),
+                "fundamentals_report": len(fundamentals_report),
+            },
+            sequence=sequence,
+        )
 
         argument = f"Aggressive Analyst: {response.content}"
 
@@ -47,13 +66,21 @@ Engage actively by addressing any specific concerns raised, refuting the weaknes
             "neutral_history": risk_debate_state.get("neutral_history", ""),
             "latest_speaker": "Aggressive",
             "current_aggressive_response": argument,
-            "current_conservative_response": risk_debate_state.get("current_conservative_response", ""),
-            "current_neutral_response": risk_debate_state.get(
-                "current_neutral_response", ""
+            "current_conservative_response": risk_debate_state.get(
+                "current_conservative_response", ""
             ),
+            "current_neutral_response": risk_debate_state.get("current_neutral_response", ""),
             "count": risk_debate_state["count"] + 1,
         }
 
-        return {"risk_debate_state": new_risk_debate_state}
+        return {
+            "risk_debate_state": new_risk_debate_state,
+            "aggressive_analyst_diagnostics": diagnostics,
+            "stage_replay_contexts": append_stage_replay_context(
+                state,
+                "aggressive",
+                {"risk_debate_state": risk_debate_state},
+            ),
+        }
 
     return aggressive_node

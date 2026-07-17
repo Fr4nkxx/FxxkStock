@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import uuid
 from pathlib import Path
@@ -86,6 +87,7 @@ class GeneralSettingsRequest(BaseModel):
     )
     web_analysis_mode: str = Field(default="auto", pattern="^(auto|full)$")
     parallel_initial_analysts: bool = True
+    parallel_blind_researchers: bool = True
     cn_market_data_source: str = Field(
         default="yfinance", pattern="^(yfinance|eastmoney)$"
     )
@@ -103,6 +105,10 @@ class GeneralSettingsRequest(BaseModel):
     cn_browser_startup_timeout_seconds: float = Field(default=15, ge=1, le=120)
     cn_browser_auto_start: bool = True
     cn_browser_auto_close: bool = True
+    cn_browser_mode: str = Field(
+        default="background",
+        pattern="^(background|headless|visible)$",
+    )
 
 
 class ApiKeyRequest(BaseModel):
@@ -516,7 +522,8 @@ def delete_report_history_item(
 def main() -> None:
     import uvicorn
 
-    uvicorn.run("webapp.server:app", host="0.0.0.0", port=8000, reload=False)
+    host = os.getenv("FXXKSTOCK_WEB_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    uvicorn.run("webapp.server:app", host=host, port=8000, reload=False)
 
 
 if __name__ == "__main__":

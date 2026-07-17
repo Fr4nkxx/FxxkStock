@@ -2,9 +2,7 @@ import os
 import sys
 
 _FXXKSTOCK_HOME = os.path.join(os.path.expanduser("~"), ".fxxkstock")
-_LEGACY_TRADINGAGENTS_HOME = os.path.join(
-    os.path.expanduser("~"), ".tradingagents"
-)
+_LEGACY_TRADINGAGENTS_HOME = os.path.join(os.path.expanduser("~"), ".tradingagents")
 
 # Promote legacy variables so existing deployments keep working while every
 # internal consumer can use the new FXXKSTOCK_* namespace consistently.
@@ -32,6 +30,7 @@ _ENV_OVERRIDES = {
     "FXXKSTOCK_CHROME_PLATFORM":      "cn_browser_platform",
     "FXXKSTOCK_CHROME_AUTO_START":    "cn_browser_auto_start",
     "FXXKSTOCK_CHROME_AUTO_CLOSE":    "cn_browser_auto_close",
+    "FXXKSTOCK_CHROME_MODE": "cn_browser_mode",
     "FXXKSTOCK_CHROME_EXECUTABLE":    "cn_browser_executable",
     "FXXKSTOCK_CHROME_PROFILE_DIR":   "cn_browser_profile_dir",
     "FXXKSTOCK_CHROME_STARTUP_TIMEOUT": "cn_browser_startup_timeout_seconds",
@@ -44,6 +43,8 @@ _ENV_OVERRIDES = {
     "FXXKSTOCK_CN_MARKET_DATA_SOURCE": "cn_market_data_source",
     "FXXKSTOCK_PARALLEL_INITIAL_ANALYSTS": "parallel_initial_analysts",
     "FXXKSTOCK_PARALLEL_INITIAL_ANALYST_WORKERS": "parallel_initial_analyst_workers",
+    "FXXKSTOCK_PARALLEL_BLIND_RESEARCHERS": "parallel_blind_researchers",
+    "FXXKSTOCK_FALSIFICATION_STRUCTURED_METHOD": "falsification_structured_method",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
     # interactive choice, which is skipped when the matching var is set.
@@ -93,15 +94,20 @@ def _apply_env_overrides(config: dict) -> dict:
     return config
 
 
-DEFAULT_CONFIG = _apply_env_overrides({
+DEFAULT_CONFIG = _apply_env_overrides(
+    {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "results_dir": os.getenv("FXXKSTOCK_RESULTS_DIR", os.path.join(_FXXKSTOCK_HOME, "logs")),
     "data_cache_dir": os.getenv("FXXKSTOCK_CACHE_DIR", os.path.join(_FXXKSTOCK_HOME, "cache")),
-    "memory_log_path": os.getenv("FXXKSTOCK_MEMORY_LOG_PATH", os.path.join("memory", "trading_memory.md")),
+        "memory_log_path": os.getenv(
+            "FXXKSTOCK_MEMORY_LOG_PATH", os.path.join("memory", "trading_memory.md")
+        ),
     "memory_log_legacy_path": os.path.join(
         _LEGACY_TRADINGAGENTS_HOME, "memory", "trading_memory.md"
     ),
-    "ticker_memory_dir": os.getenv("FXXKSTOCK_TICKER_MEMORY_DIR", os.path.join("memory", "tickers")),
+        "ticker_memory_dir": os.getenv(
+            "FXXKSTOCK_TICKER_MEMORY_DIR", os.path.join("memory", "tickers")
+        ),
     "calibration_memory_dir": os.getenv(
         "FXXKSTOCK_CALIBRATION_MEMORY_DIR", os.path.join("memory", "calibration")
     ),
@@ -150,6 +156,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # remains available through the settings page and environment override.
     "parallel_initial_analysts": True,
     "parallel_initial_analyst_workers": 4,
+    # Blind Bull/Bear prompts are isolated, so their first-pass opinions can
+    # run concurrently without exposing one branch to the other.
+    "parallel_blind_researchers": True,
+    # Keep provider behavior unchanged unless a compatible structured-output
+    # transport has been benchmarked for the configured model gateway.
+    "falsification_structured_method": "provider_default",
     # News / data fetching parameters
     # Increase for longer lookback strategies or to broaden macro coverage;
     # decrease to reduce token usage in agent prompts.
@@ -171,8 +183,25 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Set to "eastmoney" to prefer East Money for CN A/H OHLCV and indicators.
     "cn_market_data_source": "yfinance",
     "cn_adr_tickers": [
-        "BABA", "JD", "PDD", "BIDU", "NIO", "XPEV", "LI", "BILI", "TME", "VIPS",
-        "WB", "YUMC", "ZTO", "BEKE", "FUTU", "TAL", "EDU", "NTES", "TCOM",
+            "BABA",
+            "JD",
+            "PDD",
+            "BIDU",
+            "NIO",
+            "XPEV",
+            "LI",
+            "BILI",
+            "TME",
+            "VIPS",
+            "WB",
+            "YUMC",
+            "ZTO",
+            "BEKE",
+            "FUTU",
+            "TAL",
+            "EDU",
+            "NTES",
+            "TCOM",
     ],
     "cn_news_article_limit": 20,
     "cn_guba_post_limit": 15,
@@ -197,10 +226,9 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "cn_browser_enabled": True,
     "cn_browser_auto_start": True,
     "cn_browser_auto_close": True,
+        "cn_browser_mode": "background",  # background, headless, or visible
     "cn_browser_platform": (
-        "macos" if sys.platform == "darwin"
-        else "windows" if os.name == "nt"
-        else "ubuntu"
+            "macos" if sys.platform == "darwin" else "windows" if os.name == "nt" else "ubuntu"
     ),
     "cn_browser_executable": os.getenv("FXXKSTOCK_CHROME_EXECUTABLE") or None,
     "cn_browser_profile_dir": os.getenv(
@@ -249,4 +277,5 @@ DEFAULT_CONFIG = _apply_env_overrides({
         ".SZ":  "399001.SZ",   # Shenzhen (SZSE Component)
         "":     "SPY",         # default for US-listed tickers (no suffix)
     },
-})
+    }
+)

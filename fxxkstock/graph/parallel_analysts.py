@@ -8,9 +8,31 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
 
+from fxxkstock.dataflows.errors import VendorError
+
 from .analyst_execution import AnalystExecutionPlan, AnalystNodeSpec
 
 AgentNode = Callable[[dict[str, Any]], dict[str, Any]]
+
+
+def _root_error_summary(exc: BaseException, limit: int = 360) -> str:
+    """Prefer a routed vendor error, otherwise return the deepest cause."""
+    current = exc
+    preferred: BaseException | None = None
+    seen: set[int] = set()
+    while id(current) not in seen:
+        seen.add(id(current))
+        if preferred is None and isinstance(current, VendorError):
+            preferred = current
+        cause = current.__cause__ or current.__context__
+        if cause is None:
+            break
+        current = cause
+    current = preferred or current
+    detail = " ".join(str(current).split()) or current.__class__.__name__
+    if len(detail) > limit:
+        detail = detail[: limit - 3] + "..."
+    return f"{current.__class__.__name__}: {detail}"
 
 
 def create_parallel_initial_analysts_node(
@@ -59,7 +81,8 @@ def create_parallel_initial_analysts_node(
                     results[spec.key] = future.result()
                 except Exception as exc:  # noqa: BLE001
                     raise RuntimeError(
-                        f"Parallel initial analyst failed: {spec.agent_node}"
+                        f"Parallel initial analyst failed: {spec.agent_node}: "
+                        f"{_root_error_summary(exc)}"
                     ) from exc
 
         merged: dict[str, Any] = {"sender": "Parallel Initial Analysts"}
@@ -127,9 +150,7 @@ def _run_single_analyst(
             branch_state["messages"] = branch_state["messages"] + tool_messages
             emitted_messages.extend(tool_messages)
     else:
-        raise RuntimeError(
-            f"{spec.agent_node} exceeded {max_tool_rounds} tool rounds"
-        )
+        raise RuntimeError(f"{spec.agent_node} exceeded {max_tool_rounds} tool rounds")
 
     return {
         "messages": emitted_messages,

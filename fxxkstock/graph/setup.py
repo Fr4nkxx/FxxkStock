@@ -31,6 +31,7 @@ from fxxkstock.agents.utils.agent_states import AgentState
 from .analyst_execution import build_analyst_execution_plan
 from .conditional_logic import ConditionalLogic
 from .parallel_analysts import create_parallel_initial_analysts_node
+from .parallel_blind_researchers import create_parallel_blind_researchers_node
 
 
 class GraphSetup:
@@ -45,6 +46,8 @@ class GraphSetup:
         *,
         parallel_initial_analysts: bool = False,
         parallel_initial_analyst_workers: int = 4,
+        parallel_blind_researchers: bool = False,
+        falsification_structured_method: str | None = None,
     ):
         """Initialize with required components."""
         self.quick_thinking_llm = quick_thinking_llm
@@ -53,10 +56,18 @@ class GraphSetup:
         self.conditional_logic = conditional_logic
         self.parallel_initial_analysts = parallel_initial_analysts
         self.parallel_initial_analyst_workers = parallel_initial_analyst_workers
+        self.parallel_blind_researchers = parallel_blind_researchers
+        method = str(falsification_structured_method or "").strip().lower()
+        if method in {"", "provider_default"}:
+            method = None
+        elif method not in {"function_calling", "json_mode", "json_schema"}:
+            raise ValueError(
+                "falsification_structured_method must be provider_default, "
+                "function_calling, json_mode, or json_schema"
+            )
+        self.falsification_structured_method = method
 
-    def setup_graph(
-        self, selected_analysts=("market", "social", "news", "fundamentals")
-    ):
+    def setup_graph(self, selected_analysts=("market", "social", "news", "fundamentals")):
         """Set up and compile the agent workflow graph.
 
         Args:
@@ -80,17 +91,14 @@ class GraphSetup:
         bear_researcher_node = create_bear_researcher(self.quick_thinking_llm)
         blind_bull_node = create_blind_bull_researcher(self.quick_thinking_llm)
         blind_bear_node = create_blind_bear_researcher(self.quick_thinking_llm)
-        evidence_ledger_node = create_evidence_ledger_builder(
-            self.quick_thinking_llm
-        )
+        evidence_ledger_node = create_evidence_ledger_builder(self.quick_thinking_llm)
         research_manager_node = create_research_manager(self.deep_thinking_llm)
-        researchability_node = create_researchability_assessor(
-            self.quick_thinking_llm
+        researchability_node = create_researchability_assessor(self.quick_thinking_llm)
+        falsification_node = create_falsification_auditor(
+            self.deep_thinking_llm,
+            structured_method=self.falsification_structured_method,
         )
-        falsification_node = create_falsification_auditor(self.deep_thinking_llm)
-        research_revision_node = create_research_manager_revision(
-            self.deep_thinking_llm
-        )
+        research_revision_node = create_research_manager_revision(self.deep_thinking_llm)
         trader_node = create_trader(self.quick_thinking_llm)
 
         # Create risk analysis nodes
@@ -102,10 +110,7 @@ class GraphSetup:
         # Create workflow
         workflow = StateGraph(AgentState)
 
-        analyst_nodes = {
-            spec.key: analyst_factories[spec.key]()
-            for spec in plan.specs
-        }
+        analyst_nodes = {spec.key: analyst_factories[spec.key]() for spec in plan.specs}
 
         # Add analyst nodes to the graph
         for spec in plan.specs:
@@ -116,8 +121,17 @@ class GraphSetup:
         # Add other nodes
         workflow.add_node("Bull Researcher", bull_researcher_node)
         workflow.add_node("Bear Researcher", bear_researcher_node)
-        workflow.add_node("Blind Bull", blind_bull_node)
-        workflow.add_node("Blind Bear", blind_bear_node)
+        if self.parallel_blind_researchers:
+            workflow.add_node(
+                "Parallel Blind Researchers",
+                create_parallel_blind_researchers_node(
+                    blind_bull_node,
+                    blind_bear_node,
+                ),
+            )
+        else:
+            workflow.add_node("Blind Bull", blind_bull_node)
+            workflow.add_node("Blind Bear", blind_bear_node)
         workflow.add_node("Evidence Ledger Builder", evidence_ledger_node)
         workflow.add_node("Research Manager", research_manager_node)
         workflow.add_node("Researchability Assessor", researchability_node)
@@ -168,9 +182,13 @@ class GraphSetup:
 
         # Add remaining edges
         workflow.add_edge("Evidence Ledger Builder", "Researchability Assessor")
-        workflow.add_edge("Researchability Assessor", "Blind Bull")
-        workflow.add_edge("Blind Bull", "Blind Bear")
-        workflow.add_edge("Blind Bear", "Bull Researcher")
+        if self.parallel_blind_researchers:
+            workflow.add_edge("Researchability Assessor", "Parallel Blind Researchers")
+            workflow.add_edge("Parallel Blind Researchers", "Bull Researcher")
+        else:
+            workflow.add_edge("Researchability Assessor", "Blind Bull")
+            workflow.add_edge("Blind Bull", "Blind Bear")
+            workflow.add_edge("Blind Bear", "Bull Researcher")
         workflow.add_conditional_edges(
             "Bull Researcher",
             self.conditional_logic.should_continue_debate,

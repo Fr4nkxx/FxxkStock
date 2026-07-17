@@ -345,6 +345,7 @@
           </div>
           <div class="grid">
             <div class="field"><label>操作系统</label><select id="browserPlatform"><option value="macos">macOS</option><option value="windows">Windows</option><option value="ubuntu">Ubuntu</option></select></div>
+            <div class="field"><label>运行方式（下次启动生效）</label><select id="browserMode"><option value="background">后台最小化（推荐）</option><option value="headless">完全无界面</option><option value="visible">正常显示</option></select></div>
             <div class="field"><label>启动等待秒数</label><input id="browserTimeout" type="number" min="1" max="120" /></div>
             <div class="field full"><label>Chrome 可执行文件，留空则自动检测</label><input id="browserExecutable" /></div>
             <div class="field full"><label>Profile 保存目录</label><input id="browserProfile" /></div>
@@ -387,6 +388,7 @@
             <div class="field"><label>记忆模式</label><select id="analysisMode"><option value="auto">自动增量</option><option value="full">完整刷新</option></select></div>
             <div class="field full"><label>执行性能</label><div class="toggle-row">
               <label class="toggle"><input id="parallelInitialAnalysts" type="checkbox" />并行运行基础分析师</label>
+              <label class="toggle"><input id="parallelBlindResearchers" type="checkbox" />并行独立多空首评（实验）</label>
             </div></div>
             <div class="field full"><label>自定义后端地址，可留空</label><input id="backendUrl" placeholder="https://api.example.com/v1" /></div>
           </div>
@@ -456,6 +458,7 @@
     }
     function applyGeneral() {
       $("browserPlatform").value = general.cn_browser_platform;
+      $("browserMode").value = general.cn_browser_mode || "background";
       $("browserTimeout").value = general.cn_browser_startup_timeout_seconds;
       $("browserExecutable").value = general.cn_browser_executable || "";
       $("browserProfile").value = general.cn_browser_profile_dir;
@@ -467,6 +470,7 @@
       $("researchDepth").value = general.web_research_depth;
       $("analysisMode").value = general.web_analysis_mode;
       $("parallelInitialAnalysts").checked = general.parallel_initial_analysts !== false;
+      $("parallelBlindResearchers").checked = general.parallel_blind_researchers === true;
       $("cnMarketDataSource").value = general.cn_market_data_source || "yfinance";
       $("backendUrl").value = general.backend_url || "";
       $("newsLimit").value = general.news_article_limit;
@@ -528,12 +532,14 @@
         web_research_depth: $("researchDepth").value,
         web_analysis_mode: $("analysisMode").value,
         parallel_initial_analysts: $("parallelInitialAnalysts").checked,
+        parallel_blind_researchers: $("parallelBlindResearchers").checked,
         cn_market_data_source: $("cnMarketDataSource").value,
         news_article_limit: Number($("newsLimit").value),
         global_news_article_limit: Number($("globalNewsLimit").value),
         cn_guba_post_limit: Number($("gubaLimit").value),
         ticker_memory_fundamentals_ttl_days: Number($("fundamentalsTtl").value),
         cn_browser_platform: $("browserPlatform").value,
+        cn_browser_mode: $("browserMode").value,
         cn_browser_executable: $("browserExecutable").value.trim() || null,
         cn_browser_profile_dir: $("browserProfile").value.trim(),
         cn_browser_startup_timeout_seconds: Number($("browserTimeout").value),
@@ -553,8 +559,10 @@
     }
     function paintBrowser() {
       const ready = !!browserState.available;
+      const modeLabels = { background: "后台最小化", headless: "完全无界面", visible: "正常显示" };
+      const managedMode = browserState.managed_mode ? ` · ${modeLabels[browserState.managed_mode] || browserState.managed_mode}` : "";
       $("browserDot").className = `dot ${ready ? "ready" : ""}`;
-      $("browserStatus").textContent = ready ? (browserState.managed ? "运行中 · 项目管理" : "运行中 · 外部进程") : "未启动";
+      $("browserStatus").textContent = ready ? (browserState.managed ? `运行中 · 项目管理${managedMode}` : "运行中 · 外部进程") : "未启动";
       $("profileStatus").textContent = `Profile: ${browserState.profile_dir || general.cn_browser_profile_dir || "-"}${browserState.profile_exists ? " · 已创建" : " · 尚未创建"}`;
       $("startBrowser").disabled = ready;
       $("closeBrowser").disabled = !browserState.can_close;
