@@ -1179,10 +1179,8 @@
     let selectedMode = "simple";
     let positionStatus = "unknown";
     let currentRunId = null;
-    let eventSource = null;
-    let runStartedAt = null;
+    const eventSources = new Map();
     let elapsedTimer = null;
-    let completedSections = new Set();
     let eventLog = [];
     let currentReport = { markdown: "", sections: {} };
     let currentOverview = null;
@@ -1638,7 +1636,6 @@
       await Promise.allSettled([quotePromise, reportsPromise]);
     }
     async function selectStock(ticker) {
-      if (eventSource) { eventSource.close(); eventSource = null; }
       selectedTicker = String(ticker || "").toUpperCase();
       localStorage.setItem(SELECTED_TICKER_KEY, selectedTicker);
       currentRunId = activeRuns[selectedTicker]?.runId || runLogs[selectedTicker] || null;
@@ -1660,6 +1657,7 @@
       const overviewPromise = loadOverview("1d");
       const calibrationPromise = loadCalibration(selectedTicker);
       renderRunPanel(activeRun);
+      updateRunButton();
       await Promise.allSettled([reportPromise, overviewPromise, calibrationPromise]);
       if (activeRun) await restoreRun(activeRun);
     }
@@ -2008,29 +2006,43 @@
       if (!run) return;
       run.percent = value;
       if (text) run.status = text;
-      run.completedStages = [...completedSections];
       saveActiveRuns();
       const group = getGroup(key);
       if (group) group.activeRun = run;
       renderStockList();
       if (selectedTicker === key) renderRunPanel(run);
     }
-    function startElapsedClock(startedAt = Date.now(), ticker = selectedTicker) {
-      clearInterval(elapsedTimer);
-      runStartedAt = Number(startedAt) || Date.now();
+    function startElapsedClock() {
+      if (elapsedTimer) return;
       elapsedTimer = setInterval(() => {
-        const run = activeRuns[String(ticker || "").toUpperCase()];
-        if (run) run.elapsedSeconds = Math.floor((Date.now() - runStartedAt) / 1000);
+        Object.values(activeRuns).forEach((run) => {
+          const startedAt = new Date(run.startedAt).getTime();
+          if (!Number.isNaN(startedAt)) run.elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+        });
       }, 5000);
     }
-    async function completeRun(run) {
+    function stopElapsedClockIfIdle() {
+      if (Object.keys(activeRuns).length) return;
       clearInterval(elapsedTimer);
+      elapsedTimer = null;
+    }
+    function updateRunButton() {
+      $("runBtn").disabled = Boolean(selectedTicker && activeRuns[selectedTicker]);
+    }
+    function closeRunEvents(runId) {
+      const source = eventSources.get(runId);
+      if (!source) return;
+      source.close();
+      eventSources.delete(runId);
+    }
+    async function completeRun(run) {
       runLogs[run.ticker] = run.runId;
       saveRunLogs();
       delete activeRuns[run.ticker];
       saveActiveRuns();
-      eventSource?.close(); eventSource = null;
-      $("runBtn").disabled = false;
+      closeRunEvents(run.runId);
+      stopElapsedClockIfIdle();
+      updateRunButton();
       await loadHistory();
       if (selectedTicker !== run.ticker) return;
       await loadOverview("1d");
@@ -2045,17 +2057,19 @@
     }
     async function handleRunEvent(run, data) {
       if (data.type === "heartbeat") return;
-      logEvent(data);
+      if (selectedTicker === run.ticker) logEvent(data);
       if (data.type === "report_section") {
         const stage = progressStage(data.section || data.label);
-        if (stage) completedSections.add(stage);
+        const completedStages = new Set(activeRuns[run.ticker]?.completedStages || []);
+        if (stage) completedStages.add(stage);
+        if (activeRuns[run.ticker]) activeRuns[run.ticker].completedStages = [...completedStages];
         const text = String(data.section || "").includes("researchability")
           ? "正在评估信息可研究性。"
           : String(data.section || "").includes("falsification")
             ? "正在执行证伪审计。"
             : `正在执行${data.label || "分析阶段"}。`;
         pushRunEvent(activeRuns[run.ticker], "blue", text);
-        setProgress(Math.min(92, 8 + completedSections.size / 6 * 84), text, run.ticker);
+        setProgress(Math.min(92, 8 + completedStages.size / 6 * 84), text, run.ticker);
       }
       if (data.type === "memory_loaded") {
         const text = data.has_memory ? "已加载股票记忆。" : "首次完整分析。";
@@ -2069,23 +2083,24 @@
       }
       if (data.type === "done") await completeRun(run);
       if (data.type === "error") {
-        clearInterval(elapsedTimer);
         pushRunEvent(activeRuns[run.ticker], "alert", data.message || "分析失败。");
         delete activeRuns[run.ticker];
         saveActiveRuns();
         stockGroups = mergeWorklist(groupHistory(historyItems));
         renderStockList();
-        eventSource?.close(); eventSource = null;
-        $("runBtn").disabled = false;
+        closeRunEvents(run.runId);
+        stopElapsedClockIfIdle();
+        updateRunButton();
         await loadHistory();
         renderRunPanel();
       }
     }
     function connectRunEvents(run) {
-      eventSource?.close();
       currentRunId = run.runId;
-      eventSource = new EventSource(`/api/runs/${run.runId}/events`);
-      eventSource.onmessage = async (event) => {
+      if (eventSources.has(run.runId)) return;
+      const source = new EventSource(`/api/runs/${run.runId}/events`);
+      eventSources.set(run.runId, source);
+      source.onmessage = async (event) => {
         let data; try { data = JSON.parse(event.data); } catch { return; }
         await handleRunEvent(run, data);
       };
@@ -2107,12 +2122,12 @@
         await handleRunEvent(run, { type: "error", message: snapshot.error });
         return;
       }
-      completedSections = new Set((snapshot.completed_sections || []).map(progressStage).filter(Boolean));
-      run.completedStages = [...completedSections];
-      const percent = Math.min(92, Math.max(2, 8 + completedSections.size / 6 * 84));
+      const completedStages = new Set((snapshot.completed_sections || []).map(progressStage).filter(Boolean));
+      run.completedStages = [...completedStages];
+      const percent = Math.min(92, Math.max(2, 8 + completedStages.size / 6 * 84));
       setProgress(percent, snapshot.status_message || "正在恢复分析进度。", run.ticker);
-      startElapsedClock(new Date(snapshot.started_at || run.startedAt).getTime(), run.ticker);
-      $("runBtn").disabled = true;
+      startElapsedClock();
+      updateRunButton();
       connectRunEvents(run);
     }
     async function reconcileActiveRuns() {
@@ -2204,7 +2219,6 @@
       closeModal("analysisModal");
       selectedTicker = ticker.toUpperCase();
       ensurePinned(selectedTicker, selectedTicker);
-      completedSections = new Set();
       eventLog = [];
       logEvent({ type: "client", message: "analysis submitted", ticker });
       $("runBtn").disabled = true;
@@ -2243,7 +2257,7 @@
       saveActiveRuns();
       stockGroups = mergeWorklist(groupHistory(historyItems));
       renderStockList();
-      startElapsedClock(new Date(run.startedAt).getTime(), run.ticker);
+      startElapsedClock();
       clearReport();
       $("instrumentName").textContent = `${selectedTicker} · ${selectedTicker}`;
       $("instrumentMeta").textContent = "正在获取基础信息...";
