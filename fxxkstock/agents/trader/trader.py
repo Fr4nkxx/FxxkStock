@@ -11,11 +11,12 @@ from fxxkstock.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_report_instructions,
 )
+from fxxkstock.agents.utils.diagnostics import append_stage_replay_context
+from fxxkstock.agents.utils.position import render_position_context
 from fxxkstock.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
-from fxxkstock.agents.utils.position import render_position_context
 
 
 def create_trader(llm):
@@ -38,8 +39,7 @@ def create_trader(llm):
                     "specific trade quantity or target portfolio percentage. Never describe a "
                     "market low, technical level, prior-report price, or proposed entry as the "
                     "user's cost basis. When discussing the user's cost or P/L, use only the "
-                    "explicit Account Position Context values."
-                    + get_report_instructions()
+                    "explicit Account Position Context values." + get_report_instructions()
                 ),
             },
             {
@@ -56,18 +56,38 @@ def create_trader(llm):
             },
         ]
 
+        diagnostics = {
+            "agent": "Trader",
+            "sequence": 1,
+            "input_characters": {
+                "prompt": sum(len(message["content"]) for message in messages),
+                "instrument_context": len(instrument_context),
+                "investment_plan": len(investment_plan),
+                "position_context": len(position_context),
+            },
+        }
         trader_plan = invoke_structured_or_freetext(
             structured_llm,
             llm,
             messages,
             render_trader_proposal,
             "Trader",
+            diagnostics=diagnostics,
         )
 
         return {
             "messages": [AIMessage(content=trader_plan)],
             "trader_investment_plan": trader_plan,
             "sender": name,
+            "trader_diagnostics": diagnostics,
+            "stage_replay_contexts": append_stage_replay_context(
+                state,
+                "trader",
+                {
+                    "investment_plan": investment_plan,
+                    "position_context": state.get("position_context") or {},
+                },
+            ),
         }
 
     return functools.partial(trader_node, name="Trader")

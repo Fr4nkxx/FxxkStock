@@ -11,16 +11,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import yfinance as yf
 import pandas as pd
+import yfinance as yf
 
 from fxxkstock.agents.utils.agent_utils import resolve_instrument_identity
+from fxxkstock.dataflows.config import get_config
+from fxxkstock.dataflows.latest_quote import fetch_latest_market_quote
 from fxxkstock.dataflows.market_utils import (
     detect_market_region,
     get_security_cn_name,
     is_cn_region,
 )
-from fxxkstock.dataflows.latest_quote import fetch_latest_market_quote
 from fxxkstock.dataflows.symbol_utils import normalize_symbol
 from fxxkstock.dataflows.utils import safe_ticker_component
 
@@ -37,8 +38,14 @@ _CHART_RANGES = {
     "6mo": ("6mo", "1d"),
     "1y": ("1y", "1d"),
 }
+_REPORT_INDEX_FILE = "index.json"
+_REPORT_INDEX_VERSION = 3
 _OVERVIEW_CACHE_TTL_SECONDS = 60
+_QUOTE_CACHE_TTL_SECONDS = 45
+_CHART_CACHE_TTL_SECONDS = 300
 _overview_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_quote_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_chart_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
 
 
 def _infer_instrument_type(ticker: str, quote_type: str | None = None) -> str:
@@ -139,6 +146,27 @@ def _normalize_decision_token(value: str | None) -> str | None:
     return cn_map.get((value or "").strip())
 
 
+def _clean_instrument_name(value: Any, ticker: str) -> str | None:
+    """Return a displayable security name, rejecting exchange/category labels."""
+    if not isinstance(value, str):
+        return None
+    name = re.sub(r"[*#`]", "", value)
+    name = re.sub(r"^[^\w\u4e00-\u9fff]+", "", name).strip(" ：:|-（(")
+    name = re.sub(r"\s+", " ", name).strip()
+    if not name:
+        return None
+    rejected = {"分析日期", "最近交易日", "已验证", "股票", "证券", "ETF"}
+    if name in rejected or name.upper() == ticker.upper():
+        return None
+    if re.fullmatch(r"[\dA-Za-z._-]+", name):
+        return None
+    if re.search(r"(?:证券交易所|交易所)$", name):
+        return None
+    if re.search(r"(?:stock exchange|securities exchange| exchange)$", name, re.I):
+        return None
+    return name
+
+
 def _extract_decision(markdown: str) -> str | None:
     patterns = (
         r"\*\*(?:Rating|评级)\*\*\s*[:：]\s*\**"
@@ -167,23 +195,26 @@ def _extract_instrument_name(markdown: str, ticker: str) -> str | None:
     """Best-effort local name extraction without another market-data request."""
     bare = re.escape(ticker.split(".")[0])
     patterns = (
+        rf"^#+\s*([^#\n|（(]{{2,80}}?)\s*[（(]\s*{bare}(?:\.(?:SS|SZ|HK))?\s*[）)]",
+        rf"(?:报告对象|标的|公司|基金名称)\s*[：:*]*\s*([^|\n（(]{{2,80}}?)\s*[（(]\s*{bare}(?:\.(?:SS|SZ|HK))?\s*[）)]",
         rf"{bare}(?:\.(?:SS|SZ|HK))?\s*[（(]([^）)\n]{{2,80}})[）)]",
         rf"([^\n|]{{2,100}})\s*[（(]{bare}(?:\.(?:SS|SZ|HK))?[）)]",
         r"(?:标的|公司|基金名称)\s*[：:*]*\s*([^|\n（(]{2,80})",
     )
-    rejected = {"分析日期", "最近交易日", "已验证", "股票", "证券", "ETF"}
     for pattern in patterns:
-        match = re.search(pattern, markdown, re.IGNORECASE)
+        match = re.search(pattern, markdown, re.IGNORECASE | re.MULTILINE)
         if not match:
             continue
-        name = re.sub(r"[*#`]", "", match.group(1))
-        name = re.sub(r"^[^\w\u4e00-\u9fff]+", "", name).strip(" ：:|-（(")
+        name = _clean_instrument_name(match.group(1), ticker)
+        if not name:
+            continue
         if re.search(
             r"(?:总体判断|综合判断|核心判断|报告对象|报告|标的|公司|基金名称)\s*[：:]",
             name,
         ):
             name = re.split(r"[：:]", name)[-1].strip()
-        if name and name.upper() != ticker and name not in rejected:
+        name = _clean_instrument_name(name, ticker)
+        if name:
             return name
     return None
 
@@ -259,6 +290,29 @@ def read_core_insights(report_dir: Path) -> list[str]:
     return [item.strip() for item in insights if isinstance(item, str) and item.strip()][:6]
 
 
+def _report_index_path(root: Path) -> Path:
+    return root / _REPORT_INDEX_FILE
+
+
+def _safe_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime if path.is_file() else 0
+    except OSError:
+        return 0
+
+
+def _report_fingerprints(root: Path) -> dict[str, dict[str, float]]:
+    fingerprints: dict[str, dict[str, float]] = {}
+    for report_dir, report_id in _iter_report_directories(root):
+        fingerprints[report_id] = {
+            "report_modified_at": _safe_mtime(report_dir / "complete_report.md"),
+            "decision_modified_at": _safe_mtime(
+                report_dir / "5_portfolio" / "decision.md"
+            ),
+        }
+    return fingerprints
+
+
 def _decision_field(markdown: str, label: str) -> str | None:
     match = re.search(
         rf"\*\*{re.escape(label)}\*\*\s*[:：]\s*([^\n]+)",
@@ -288,14 +342,17 @@ def _report_year(report_dir: Path, created_at: str) -> int:
         return datetime.fromtimestamp(report_dir.stat().st_mtime).year
 
 
-def _dated_field_nodes(text: str, default_year: int, node_type: str) -> list[dict[str, Any]]:
+def _dated_field_nodes(
+    text: str,
+    default_year: int,
+    node_type: str,
+) -> list[dict[str, Any]]:
     nodes: list[dict[str, Any]] = []
     for raw in re.split(r"[。；;\n]+", text):
         sentence = _remove_written_weekday(raw.strip())
         if not sentence:
             continue
-        matches = list(_CALENDAR_DATE_PATTERN.finditer(sentence))
-        for match in matches:
+        for match in _CALENDAR_DATE_PATTERN.finditer(sentence):
             if match.group(1):
                 year, month, day = map(int, match.group(1, 2, 3))
             else:
@@ -306,17 +363,22 @@ def _dated_field_nodes(text: str, default_year: int, node_type: str) -> list[dic
             except ValueError:
                 continue
             action = re.split(r"[：:]", sentence, maxsplit=1)[-1].strip()
-            nodes.append({
-                "node_type": node_type,
-                "trigger_type": "date",
-                "calendar_date": calendar_date,
-                "event": None,
-                "action": action or sentence,
-            })
+            nodes.append(
+                {
+                    "node_type": node_type,
+                    "trigger_type": "date",
+                    "calendar_date": calendar_date,
+                    "event": None,
+                    "action": action or sentence,
+                }
+            )
     return nodes
 
 
-def _legacy_calendar_nodes(report_dir: Path, created_at: str) -> list[dict[str, Any]]:
+def _legacy_calendar_nodes(
+    report_dir: Path,
+    created_at: str,
+) -> list[dict[str, Any]]:
     """Backfill nodes from the fixed decision fields in reports without JSON."""
     markdown = _read_text(report_dir / "5_portfolio" / "decision.md")
     if not markdown:
@@ -334,14 +396,19 @@ def _legacy_calendar_nodes(report_dir: Path, created_at: str) -> list[dict[str, 
             continue
         event, action = (sentence, sentence)
         if re.search(r"[：:]", sentence):
-            event, action = [part.strip() for part in re.split(r"[：:]", sentence, maxsplit=1)]
-        nodes.append({
-            "node_type": "review",
-            "trigger_type": "event",
-            "calendar_date": None,
-            "event": event,
-            "action": action,
-        })
+            event, action = [
+                part.strip()
+                for part in re.split(r"[：:]", sentence, maxsplit=1)
+            ]
+        nodes.append(
+            {
+                "node_type": "review",
+                "trigger_type": "event",
+                "calendar_date": None,
+                "event": event,
+                "action": action,
+            }
+        )
     for label, node_type in (
         ("Execution Condition", "execution"),
         ("Risk Boundary", "risk"),
@@ -349,30 +416,40 @@ def _legacy_calendar_nodes(report_dir: Path, created_at: str) -> list[dict[str, 
         condition = _decision_field(markdown, label)
         if condition:
             nodes.extend(_dated_field_nodes(condition, default_year, node_type))
-            nodes.append({
-                "node_type": node_type,
-                "trigger_type": "condition",
-                "calendar_date": None,
-                "condition": condition,
-                "event": None,
-                "action": condition,
-            })
+            nodes.append(
+                {
+                    "node_type": node_type,
+                    "trigger_type": "condition",
+                    "calendar_date": None,
+                    "condition": condition,
+                    "event": None,
+                    "action": condition,
+                }
+            )
     return nodes
 
 
-def read_calendar_nodes(report_dir: Path, created_at: str = "") -> list[dict[str, Any]]:
+def read_calendar_nodes(
+    report_dir: Path,
+    created_at: str = "",
+) -> list[dict[str, Any]]:
     path = report_dir / _CALENDAR_NODES_FILE
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, ValueError, TypeError):
         return _legacy_calendar_nodes(report_dir, created_at)
     nodes = payload.get("nodes") if isinstance(payload, dict) else None
-    result = [item for item in nodes if isinstance(item, dict)] if isinstance(nodes, list) else []
+    result = (
+        [item for item in nodes if isinstance(item, dict)]
+        if isinstance(nodes, list)
+        else []
+    )
     markdown = _read_text(report_dir / "5_portfolio" / "decision.md")
     default_year = _report_year(report_dir, created_at)
     existing = {
         (item.get("node_type"), item.get("calendar_date"))
-        for item in result if item.get("calendar_date")
+        for item in result
+        if item.get("calendar_date")
     }
     for label, node_type in (
         ("Review Trigger", "review"),
@@ -390,7 +467,9 @@ def read_calendar_nodes(report_dir: Path, created_at: str = "") -> list[dict[str
     return result
 
 
-def list_calendar_nodes(reports_root: Path | None = None) -> list[dict[str, Any]]:
+def list_calendar_nodes(
+    reports_root: Path | None = None,
+) -> list[dict[str, Any]]:
     """Return active nodes from the latest report for each ticker."""
     reports = list_historical_reports(reports_root, limit=1000)
     seen: set[str] = set()
@@ -401,54 +480,144 @@ def list_calendar_nodes(reports_root: Path | None = None) -> list[dict[str, Any]
             continue
         seen.add(ticker)
         report_dir = Path(report["report_dir"])
-        nodes = read_calendar_nodes(report_dir, str(report.get("created_at") or ""))
+        nodes = read_calendar_nodes(
+            report_dir,
+            str(report.get("created_at") or ""),
+        )
         for index, item in enumerate(nodes):
             node = dict(item)
-            node.update({
-                "id": f"{report['id']}#{index}",
-                "ticker": ticker,
-                "name": report.get("name") or ticker,
-                "report_id": report["id"],
-                "report_created_at": report.get("created_at"),
-            })
+            node.update(
+                {
+                    "id": f"{report['id']}#{index}",
+                    "ticker": ticker,
+                    "name": report.get("name") or ticker,
+                    "report_id": report["id"],
+                    "report_created_at": report.get("created_at"),
+                }
+            )
             result.append(node)
     return result
 
 
-def list_historical_reports(reports_root: Path | None = None, limit: int = 100) -> list[dict]:
-    """列出 reports/ 下已保存的历史报告，按时间倒序。"""
+def _fingerprints_match(
+    expected: dict[str, dict[str, float]],
+    actual: dict[str, dict[str, float]],
+) -> bool:
+    if expected.keys() != actual.keys():
+        return False
+    for report_id, values in expected.items():
+        current = actual.get(report_id) or {}
+        if values.get("report_modified_at") != current.get("report_modified_at"):
+            return False
+        if values.get("decision_modified_at") != current.get("decision_modified_at"):
+            return False
+    return True
+
+
+def _read_report_index(
+    root: Path,
+    fingerprints: dict[str, dict[str, float]],
+) -> list[dict] | None:
+    path = _report_index_path(root)
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.debug("Ignoring invalid report index %s: %s", path, exc)
+        return None
+    if payload.get("version") != _REPORT_INDEX_VERSION:
+        return None
+    indexed_fingerprints = payload.get("fingerprints")
+    if not isinstance(indexed_fingerprints, dict):
+        return None
+    if not _fingerprints_match(indexed_fingerprints, fingerprints):
+        return None
+    reports = payload.get("reports")
+    if not isinstance(reports, list):
+        return None
+    return [item for item in reports if isinstance(item, dict)]
+
+
+def _write_report_index(
+    root: Path,
+    items: list[dict],
+    fingerprints: dict[str, dict[str, float]],
+) -> None:
+    path = _report_index_path(root)
+    payload = {
+        "version": _REPORT_INDEX_VERSION,
+        "generated_at": datetime.now().isoformat(),
+        "fingerprints": fingerprints,
+        "reports": items,
+    }
+    try:
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        tmp_path.replace(path)
+    except OSError as exc:
+        logger.debug("Could not write report index %s: %s", path, exc)
+
+
+def _build_report_index_item(
+    entry: Path,
+    report_id: str,
+    fingerprint: dict[str, float],
+) -> dict:
+    report_file = entry / "complete_report.md"
+    meta = _parse_report_dir_name(report_id) or {
+        "ticker": report_id,
+        "created_at": "",
+    }
+    markdown = report_file.read_text(encoding="utf-8", errors="replace")
+    decision_source = _read_decision_source(entry, markdown)
+    return {
+        "id": report_id,
+        "ticker": meta["ticker"],
+        "created_at": meta["created_at"],
+        "title": _extract_title(markdown) or meta["ticker"],
+        "name": _extract_instrument_name(markdown, meta["ticker"]),
+        "decision": _extract_decision(decision_source),
+        "report_dir": str(entry.resolve()),
+        "modified_at": fingerprint.get("report_modified_at", 0),
+    }
+
+
+def _rebuild_report_index(
+    root: Path,
+    fingerprints: dict[str, dict[str, float]],
+) -> list[dict]:
+    items: list[dict] = []
+    for report_id, fingerprint in fingerprints.items():
+        try:
+            report_dir = root.joinpath(*report_id.split("/"))
+            items.append(
+                _build_report_index_item(report_dir, report_id, fingerprint)
+            )
+        except OSError as exc:
+            logger.debug("Skipping report %s during index rebuild: %s", report_id, exc)
+    items.sort(key=lambda x: x["modified_at"], reverse=True)
+    _write_report_index(root, items, fingerprints)
+    return items
+
+
+def list_historical_reports(
+    reports_root: Path | None = None,
+    limit: int | None = 100,
+) -> list[dict]:
+    """List saved reports newest-first, using an index to avoid rereading Markdown."""
     root = reports_root or get_reports_root()
     if not root.is_dir():
         return []
 
-    items: list[dict] = []
-    for entry, report_id in _iter_report_directories(root):
-        report_file = entry / "complete_report.md"
-        meta = _parse_report_dir_name(report_id) or {
-            "ticker": entry.name,
-            "created_at": "",
-        }
-        try:
-            mtime = report_file.stat().st_mtime
-        except OSError:
-            mtime = 0
-        markdown = report_file.read_text(encoding="utf-8", errors="replace")
-        decision_source = _read_decision_source(entry, markdown)
-        items.append(
-            {
-                "id": report_id,
-                "ticker": meta["ticker"],
-                "created_at": meta["created_at"],
-                "title": _extract_title(markdown) or meta["ticker"],
-                "name": _extract_instrument_name(markdown, meta["ticker"]),
-                "decision": _extract_decision(decision_source),
-                "report_dir": str(entry.resolve()),
-                "modified_at": mtime,
-            }
-        )
-
-    items.sort(key=lambda x: x["modified_at"], reverse=True)
-    return items[:limit]
+    fingerprints = _report_fingerprints(root)
+    indexed = _read_report_index(root, fingerprints)
+    items = indexed if indexed is not None else _rebuild_report_index(root, fingerprints)
+    items.sort(key=lambda x: x.get("modified_at", 0), reverse=True)
+    return items if limit is None else items[:limit]
 
 
 def _validate_report_id(report_id: str) -> None:
@@ -472,8 +641,8 @@ def get_historical_report(report_id: str, reports_root: Path | None = None) -> d
     report_dir = root.joinpath(*report_id.split("/")).resolve()
     try:
         report_dir.relative_to(root.resolve())
-    except ValueError:
-        raise ValueError("invalid report path")
+    except ValueError as exc:
+        raise ValueError("invalid report path") from exc
     report_file = report_dir / "complete_report.md"
     if not report_file.is_file():
         raise FileNotFoundError(report_id)
@@ -536,39 +705,60 @@ def delete_stock_reports(ticker: str, reports_root: Path | None = None) -> dict[
     return {"deleted": True, "ticker": ticker, "reports_deleted": len(matches)}
 
 
-def get_stock_overview(
-    ticker: str,
-    reports_root: Path | None = None,
-    chart_range: str = "1d",
-) -> dict[str, Any]:
-    """Return identity, latest market move, and all saved reports for one ticker."""
+def _normalize_requested_ticker(ticker: str) -> str:
     ticker = ticker.strip().upper()
     safe_ticker_component(ticker)
-    cache_key = (ticker, chart_range)
-    cached = _overview_cache.get(cache_key)
-    if cached and time.monotonic() - cached[0] < _OVERVIEW_CACHE_TTL_SECONDS:
-        return cached[1]
+    return ticker
+
+
+def get_stock_reports(
+    ticker: str,
+    reports_root: Path | None = None,
+    limit: int = 1000,
+) -> list[dict]:
+    """Return saved report summaries for one ticker without loading full reports."""
+    ticker = _normalize_requested_ticker(ticker)
     reports = [
-        item for item in list_historical_reports(reports_root, limit=1000)
+        item for item in list_historical_reports(reports_root, limit=None)
         if item["ticker"].upper() == ticker
     ]
-    local_name = next((item.get("name") for item in reports if item.get("name")), None)
+    return reports[:limit]
 
+
+def _resolve_overview_identity(
+    ticker: str,
+    reports: list[dict],
+) -> tuple[dict[str, Any], str, str | None]:
+    local_name = next(
+        (
+            cleaned
+            for item in reports
+            if (cleaned := _clean_instrument_name(item.get("name"), ticker))
+        ),
+        None,
+    )
     region = detect_market_region(ticker)
-    identity = {} if is_cn_region(region) else dict(resolve_instrument_identity(ticker))
+    identity: dict[str, Any] = {}
+    if not is_cn_region(region):
+        if local_name:
+            identity["company_name"] = local_name
+        else:
+            identity.update(resolve_instrument_identity(ticker))
     region = detect_market_region(ticker, identity)
     if is_cn_region(region):
-        cn_name = get_security_cn_name(ticker, region)
-        if cn_name:
-            identity["company_name"] = cn_name
-        elif local_name:
+        if local_name:
             identity["company_name"] = local_name
+        else:
+            cn_name = get_security_cn_name(ticker, region)
+            if cn_name:
+                identity["company_name"] = cn_name
     elif local_name:
         identity["company_name"] = local_name
+    return identity, region, local_name
 
-    if chart_range not in _CHART_RANGES:
-        raise ValueError(f"unsupported chart range: {chart_range}")
-    quote = {
+
+def _empty_quote() -> dict[str, Any]:
+    return {
         "last_price": None,
         "open": None,
         "high": None,
@@ -587,7 +777,10 @@ def get_stock_overview(
         "price_basis": "latest_complete_ohlcv",
         "source": "yfinance",
     }
-    details = {
+
+
+def _overview_details(ticker: str, identity: dict[str, Any]) -> dict[str, Any]:
+    return {
         "quote_type": identity.get("quote_type"),
         "instrument_type": _infer_instrument_type(ticker, identity.get("quote_type")),
         "category": None,
@@ -596,170 +789,245 @@ def get_stock_overview(
         "inception_date": None,
         "website": None,
     }
-    chart: list[dict[str, Any]] = []
+
+
+def _apply_latest_quote(
+    quote: dict[str, Any],
+    identity: dict[str, Any],
+    latest_quote: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(latest_quote, dict) or not latest_quote.get("last_price"):
+        return False
+    quote["price_basis"] = "latest_quote"
+    quote["source"] = latest_quote.get("source") or quote["source"]
+    for source, target in (
+        ("last_price", "last_price"),
+        ("open", "open"),
+        ("high", "high"),
+        ("low", "low"),
+        ("previous_close", "previous_close"),
+        ("change", "change"),
+        ("change_percent", "change_percent"),
+        ("volume", "volume"),
+        ("turnover", "turnover"),
+        ("fifty_two_week_high", "fifty_two_week_high"),
+        ("fifty_two_week_low", "fifty_two_week_low"),
+        ("market_cap", "market_cap"),
+    ):
+        value = latest_quote.get(source)
+        if value is not None:
+            quote[target] = value
+    if latest_quote.get("as_of"):
+        quote["as_of"] = latest_quote["as_of"]
+    quote_name = _clean_instrument_name(latest_quote.get("name"), str(latest_quote.get("ticker") or ""))
+    if not identity.get("company_name") and quote_name:
+        identity["company_name"] = quote_name
+    if not identity.get("currency") and latest_quote.get("currency"):
+        identity["currency"] = latest_quote["currency"]
+    if quote["change"] is None and quote["previous_close"] not in (None, 0):
+        quote["change"] = quote["last_price"] - quote["previous_close"]
+        quote["change_percent"] = quote["change"] / quote["previous_close"] * 100
+    return True
+
+
+def _apply_daily_quote_from_yfinance(
+    stock: Any,
+    quote: dict[str, Any],
+) -> None:
+    daily_frame = stock.history(
+        period="5d",
+        interval="1d",
+        auto_adjust=False,
+    )
+    daily_closes = daily_frame["Close"].dropna()
+    if daily_closes.empty:
+        return
+    latest_index = daily_closes.index[-1]
+    latest = daily_frame.loc[latest_index]
+    last = float(daily_closes.iloc[-1])
+    previous = float(daily_closes.iloc[-2]) if len(daily_closes) > 1 else None
+    quote["last_price"] = last
+    quote["previous_close"] = previous
+    if previous not in (None, 0):
+        quote["change"] = last - previous
+        quote["change_percent"] = (last - previous) / previous * 100
+    for source, target in (
+        ("Open", "open"),
+        ("High", "high"),
+        ("Low", "low"),
+    ):
+        value = latest.get(source)
+        quote[target] = (
+            float(value)
+            if value is not None and pd.notna(value)
+            else None
+        )
+    volume = latest.get("Volume")
+    quote["volume"] = (
+        int(volume)
+        if volume is not None and pd.notna(volume)
+        else None
+    )
+    if quote["last_price"] is not None and quote["volume"] is not None:
+        quote["turnover"] = quote["last_price"] * quote["volume"]
+    quote["as_of"] = (
+        latest_index.date().isoformat()
+        if hasattr(latest_index, "date")
+        else str(latest_index)
+    )
+
+
+def _apply_daily_quote_from_eastmoney(
+    ticker: str,
+    identity: dict[str, Any],
+    quote: dict[str, Any],
+) -> bool:
+    if (
+        str(get_config().get("cn_market_data_source", "yfinance")).strip().lower()
+        != "eastmoney"
+    ):
+        return False
+    if detect_market_region(ticker) not in {"cn_a", "cn_hk"}:
+        return False
     try:
-        stock = yf.Ticker(normalize_symbol(ticker))
-        period, interval = _CHART_RANGES[chart_range]
-        frame = stock.history(
-            period=period,
-            interval=interval,
-            auto_adjust=False,
-        )
-        closes = frame["Close"].dropna()
-        if not closes.empty:
-            stride = max(1, len(closes) // 140)
-            sampled = closes.iloc[::stride]
-            if sampled.index[-1] != closes.index[-1]:
-                sampled = pd.concat([sampled, closes.iloc[[-1]]])
-            chart = [
-                {
-                    "time": index.isoformat() if hasattr(index, "isoformat") else str(index),
-                    "close": round(float(value), 6),
-                }
-                for index, value in sampled.items()
-            ]
+        from fxxkstock.dataflows.eastmoney_market import load_eastmoney_ohlcv
 
-        # Quote cards must use the complete daily bar. The chart may use 5-minute
-        # bars, whose final row represents only the last interval rather than the
-        # session's open/high/low/volume.
-        daily_frame = stock.history(
-            period="5d",
-            interval="1d",
-            auto_adjust=False,
-        )
-        daily_closes = daily_frame["Close"].dropna()
-        if not daily_closes.empty:
-            latest_index = daily_closes.index[-1]
-            latest = daily_frame.loc[latest_index]
-            last = float(daily_closes.iloc[-1])
-            previous = (
-                float(daily_closes.iloc[-2]) if len(daily_closes) > 1 else None
-            )
-            quote["last_price"] = last
-            quote["previous_close"] = previous
-            if previous not in (None, 0):
-                quote["change"] = last - previous
-                quote["change_percent"] = (last - previous) / previous * 100
-            for source, target in (
-                ("Open", "open"),
-                ("High", "high"),
-                ("Low", "low"),
-            ):
-                value = latest.get(source)
-                quote[target] = (
-                    float(value)
-                    if value is not None and pd.notna(value)
-                    else None
-                )
-            volume = latest.get("Volume")
-            quote["volume"] = (
-                int(volume)
-                if volume is not None and pd.notna(volume)
-                else None
-            )
-            if quote["last_price"] is not None and quote["volume"] is not None:
-                quote["turnover"] = quote["last_price"] * quote["volume"]
-            quote["as_of"] = (
-                latest_index.date().isoformat()
-                if hasattr(latest_index, "date")
-                else str(latest_index)
-            )
-        elif not closes.empty:
-            # Degraded fallback: aggregate all available intraday rows instead
-            # of exposing the final five-minute candle as a daily quote.
-            quote["last_price"] = float(closes.iloc[-1])
-            first_open = frame["Open"].dropna() if "Open" in frame else closes
-            highs = frame["High"].dropna() if "High" in frame else closes
-            lows = frame["Low"].dropna() if "Low" in frame else closes
-            quote["open"] = float(first_open.iloc[0])
-            quote["high"] = float(highs.max())
-            quote["low"] = float(lows.min())
-            if "Volume" in frame:
-                quote["volume"] = int(frame["Volume"].fillna(0).sum())
-            quote["as_of"] = closes.index[-1].isoformat()
-        try:
-            info = stock.info or {}
-        except Exception:
-            info = {}
-        for source, target in (
-            ("longName", "company_name"),
-            ("exchange", "exchange"),
-            ("currency", "currency"),
-            ("sector", "sector"),
-            ("industry", "industry"),
-            ("quoteType", "quote_type"),
-        ):
-            value = info.get(source)
-            if value and not identity.get(target):
-                identity[target] = value
-        for source, target in (
-            ("fiftyTwoWeekHigh", "fifty_two_week_high"),
-            ("fiftyTwoWeekLow", "fifty_two_week_low"),
-            ("trailingPE", "trailing_pe"),
-            ("priceToBook", "price_to_book"),
-            ("marketCap", "market_cap"),
-        ):
-            value = info.get(source)
-            if isinstance(value, (int, float)):
-                quote[target] = value
-        details.update({
-            "category": info.get("category"),
-            "fund_family": info.get("fundFamily"),
-            "tracking_index": info.get("indexTracked"),
-            "website": info.get("website"),
-        })
-        inception = info.get("fundInceptionDate")
-        if isinstance(inception, (int, float)):
-            details["inception_date"] = datetime.fromtimestamp(inception).date().isoformat()
-        details["quote_type"] = identity.get("quote_type")
-        details["instrument_type"] = _infer_instrument_type(
-            ticker,
-            identity.get("quote_type"),
-        )
+        frame = load_eastmoney_ohlcv(ticker, datetime.now().date().isoformat())
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not load stock overview quote for %s: %s", ticker, exc)
+        logger.debug("Could not load Eastmoney daily quote for %s: %s", ticker, exc)
+        return False
+    if frame is None or frame.empty or "Close" not in frame.columns:
+        return False
+    frame = frame.sort_values("Date") if "Date" in frame.columns else frame
+    latest = frame.iloc[-1]
+    last = latest.get("Close")
+    if last is None or pd.isna(last):
+        return False
+    quote["source"] = "eastmoney"
+    quote["price_basis"] = "latest_complete_ohlcv"
+    quote["last_price"] = float(last)
+    if not identity.get("currency"):
+        identity["currency"] = "CNY"
+    previous = frame["Close"].dropna().iloc[-2] if len(frame["Close"].dropna()) > 1 else None
+    if previous not in (None, 0):
+        quote["previous_close"] = float(previous)
+        quote["change"] = quote["last_price"] - quote["previous_close"]
+        quote["change_percent"] = quote["change"] / quote["previous_close"] * 100
+    for source, target in (
+        ("Open", "open"),
+        ("High", "high"),
+        ("Low", "low"),
+    ):
+        value = latest.get(source)
+        quote[target] = (
+            float(value)
+            if value is not None and pd.notna(value)
+            else None
+        )
+    volume = latest.get("Volume")
+    quote["volume"] = (
+        int(volume)
+        if volume is not None and pd.notna(volume)
+        else None
+    )
+    amount = latest.get("Amount")
+    if amount is not None and pd.notna(amount):
+        quote["turnover"] = float(amount)
+    elif quote["last_price"] is not None and quote["volume"] is not None:
+        quote["turnover"] = quote["last_price"] * quote["volume"]
+    if "Date" in frame.columns:
+        latest_date = pd.to_datetime(latest.get("Date"), errors="coerce")
+        if pd.notna(latest_date):
+            quote["as_of"] = latest_date.date().isoformat()
+    return True
 
-    if reports_root is None:
-        try:
-            latest_quote = fetch_latest_market_quote(ticker, region)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("Could not load latest quote for %s: %s", ticker, exc)
-            latest_quote = None
-        if isinstance(latest_quote, dict) and latest_quote.get("last_price"):
-            quote["price_basis"] = "latest_quote"
-            quote["source"] = latest_quote.get("source") or quote["source"]
-            for source, target in (
-                ("last_price", "last_price"),
-                ("open", "open"),
-                ("high", "high"),
-                ("low", "low"),
-                ("previous_close", "previous_close"),
-                ("change", "change"),
-                ("change_percent", "change_percent"),
-                ("volume", "volume"),
-                ("turnover", "turnover"),
-                ("fifty_two_week_high", "fifty_two_week_high"),
-                ("fifty_two_week_low", "fifty_two_week_low"),
-                ("market_cap", "market_cap"),
-            ):
-                value = latest_quote.get(source)
-                if value is not None:
-                    quote[target] = value
-            if latest_quote.get("as_of"):
-                quote["as_of"] = latest_quote["as_of"]
-            if not identity.get("currency") and latest_quote.get("currency"):
-                identity["currency"] = latest_quote["currency"]
-            if quote["change"] is None and quote["previous_close"] not in (None, 0):
-                quote["change"] = quote["last_price"] - quote["previous_close"]
-                quote["change_percent"] = (
-                    quote["change"] / quote["previous_close"] * 100
-                )
 
-    result = {
+def _apply_intraday_quote_fallback(
+    frame: pd.DataFrame,
+    quote: dict[str, Any],
+) -> None:
+    closes = frame["Close"].dropna()
+    if closes.empty:
+        return
+    quote["last_price"] = float(closes.iloc[-1])
+    first_open = frame["Open"].dropna() if "Open" in frame else closes
+    highs = frame["High"].dropna() if "High" in frame else closes
+    lows = frame["Low"].dropna() if "Low" in frame else closes
+    quote["open"] = float(first_open.iloc[0])
+    quote["high"] = float(highs.max())
+    quote["low"] = float(lows.min())
+    if "Volume" in frame:
+        quote["volume"] = int(frame["Volume"].fillna(0).sum())
+    quote["as_of"] = closes.index[-1].isoformat()
+
+
+def _apply_yfinance_info(
+    stock: Any,
+    identity: dict[str, Any],
+    details: dict[str, Any],
+    quote: dict[str, Any],
+    ticker: str,
+) -> None:
+    try:
+        info = stock.info or {}
+    except Exception:
+        info = {}
+    if not isinstance(info, dict):
+        info = {}
+    for source, target in (
+        ("longName", "company_name"),
+        ("exchange", "exchange"),
+        ("currency", "currency"),
+        ("sector", "sector"),
+        ("industry", "industry"),
+        ("quoteType", "quote_type"),
+    ):
+        value = info.get(source)
+        if value and not identity.get(target):
+            if target == "company_name":
+                value = _clean_instrument_name(value, ticker)
+                if not value:
+                    continue
+            identity[target] = value
+    for source, target in (
+        ("fiftyTwoWeekHigh", "fifty_two_week_high"),
+        ("fiftyTwoWeekLow", "fifty_two_week_low"),
+        ("trailingPE", "trailing_pe"),
+        ("priceToBook", "price_to_book"),
+        ("marketCap", "market_cap"),
+    ):
+        value = info.get(source)
+        if isinstance(value, (int, float)):
+            quote[target] = value
+    details.update({
+        "category": info.get("category"),
+        "fund_family": info.get("fundFamily"),
+        "tracking_index": info.get("indexTracked"),
+        "website": info.get("website"),
+    })
+    inception = info.get("fundInceptionDate")
+    if isinstance(inception, (int, float)):
+        details["inception_date"] = datetime.fromtimestamp(inception).date().isoformat()
+    details["quote_type"] = identity.get("quote_type")
+    details["instrument_type"] = _infer_instrument_type(
+        ticker,
+        identity.get("quote_type"),
+    )
+
+
+def _quote_payload(
+    ticker: str,
+    identity: dict[str, Any],
+    region: str,
+    local_name: str | None,
+    quote: dict[str, Any],
+    details: dict[str, Any],
+) -> dict[str, Any]:
+    return {
         "ticker": ticker,
         "name": (
-            identity.get("company_name")
-            or local_name
+            _clean_instrument_name(identity.get("company_name"), ticker)
+            or _clean_instrument_name(local_name, ticker)
             or ticker
         ),
         "market_region": region,
@@ -768,10 +1036,175 @@ def get_stock_overview(
         "sector": identity.get("sector"),
         "industry": identity.get("industry"),
         "details": details,
+        "quote": quote,
+    }
+
+
+def get_stock_quote(
+    ticker: str,
+    reports_root: Path | None = None,
+) -> dict[str, Any]:
+    """Return identity and latest quote data without loading chart history."""
+    ticker = _normalize_requested_ticker(ticker)
+    use_cache = reports_root is None
+    cached = _quote_cache.get(ticker) if use_cache else None
+    if cached and time.monotonic() - cached[0] < _QUOTE_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    reports = get_stock_reports(ticker, reports_root=reports_root, limit=1000)
+    identity, region, local_name = _resolve_overview_identity(ticker, reports)
+    quote = _empty_quote()
+    details = _overview_details(ticker, identity)
+    latest_quote_used = False
+    if reports_root is None:
+        try:
+            latest_quote_used = _apply_latest_quote(
+                quote,
+                identity,
+                fetch_latest_market_quote(ticker, region),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Could not load latest quote for %s: %s", ticker, exc)
+
+    if not latest_quote_used:
+        eastmoney_daily_used = _apply_daily_quote_from_eastmoney(ticker, identity, quote)
+    else:
+        eastmoney_daily_used = False
+
+    if not latest_quote_used and not eastmoney_daily_used:
+        try:
+            stock = yf.Ticker(normalize_symbol(ticker))
+            _apply_daily_quote_from_yfinance(stock, quote)
+            _apply_yfinance_info(stock, identity, details, quote, ticker)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not load stock quote for %s: %s", ticker, exc)
+
+    result = _quote_payload(ticker, identity, region, local_name, quote, details)
+    if use_cache:
+        _quote_cache[ticker] = (time.monotonic(), result)
+    return result
+
+
+def _sample_chart_points(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    closes = frame["Close"].dropna()
+    if closes.empty:
+        return []
+    if "Date" in frame.columns:
+        dates = pd.to_datetime(frame.loc[closes.index, "Date"], errors="coerce")
+        if dates.notna().any():
+            closes = closes.copy()
+            closes.index = dates
+    stride = max(1, len(closes) // 140)
+    sampled = closes.iloc[::stride]
+    if sampled.index[-1] != closes.index[-1]:
+        sampled = pd.concat([sampled, closes.iloc[[-1]]])
+    return [
+        {
+            "time": index.isoformat() if hasattr(index, "isoformat") else str(index),
+            "close": round(float(value), 6),
+        }
+        for index, value in sampled.items()
+    ]
+
+
+def _eastmoney_chart_frame(ticker: str, chart_range: str) -> pd.DataFrame | None:
+    if (
+        str(get_config().get("cn_market_data_source", "yfinance")).strip().lower()
+        != "eastmoney"
+    ):
+        return None
+    region = detect_market_region(ticker)
+    if region not in {"cn_a", "cn_hk"}:
+        return None
+    try:
+        from fxxkstock.dataflows.eastmoney_market import load_eastmoney_ohlcv
+
+        frame = load_eastmoney_ohlcv(ticker, datetime.now().date().isoformat())
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not load Eastmoney chart for %s: %s", ticker, exc)
+        return None
+    if frame is None or frame.empty:
+        return None
+    frame = frame.sort_values("Date")
+    row_counts = {
+        "1d": 2,
+        "5d": 5,
+        "1mo": 22,
+        "6mo": 126,
+        "1y": 252,
+    }
+    return frame.tail(row_counts.get(chart_range, 22))
+
+
+def get_stock_chart(ticker: str, chart_range: str = "1d") -> dict[str, Any]:
+    """Return chart points only; this may be slower than the quote endpoint."""
+    ticker = _normalize_requested_ticker(ticker)
+    if chart_range not in _CHART_RANGES:
+        raise ValueError(f"unsupported chart range: {chart_range}")
+    cache_key = (ticker, chart_range)
+    cached = _chart_cache.get(cache_key)
+    if cached and time.monotonic() - cached[0] < _CHART_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    chart: list[dict[str, Any]] = []
+    source = "yfinance"
+    eastmoney_frame = _eastmoney_chart_frame(ticker, chart_range)
+    if eastmoney_frame is not None:
+        chart = _sample_chart_points(eastmoney_frame)
+        source = "eastmoney"
+        result = {
+            "ticker": ticker,
+            "chart_range": chart_range,
+            "chart": chart,
+            "source": source,
+        }
+        _chart_cache[cache_key] = (time.monotonic(), result)
+        return result
+
+    try:
+        stock = yf.Ticker(normalize_symbol(ticker))
+        period, interval = _CHART_RANGES[chart_range]
+        frame = stock.history(
+            period=period,
+            interval=interval,
+            auto_adjust=False,
+        )
+        chart = _sample_chart_points(frame)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not load stock chart for %s: %s", ticker, exc)
+
+    result = {
+        "ticker": ticker,
         "chart_range": chart_range,
         "chart": chart,
-        "quote": quote,
+        "source": source,
+    }
+    _chart_cache[cache_key] = (time.monotonic(), result)
+    return result
+
+
+def get_stock_overview(
+    ticker: str,
+    reports_root: Path | None = None,
+    chart_range: str = "1d",
+) -> dict[str, Any]:
+    """Return the legacy combined overview payload."""
+    ticker = _normalize_requested_ticker(ticker)
+    cache_key = (ticker, chart_range)
+    use_cache = reports_root is None
+    cached = _overview_cache.get(cache_key) if use_cache else None
+    if cached and time.monotonic() - cached[0] < _OVERVIEW_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    reports = get_stock_reports(ticker, reports_root=reports_root, limit=1000)
+    chart_payload = get_stock_chart(ticker, chart_range)
+    quote_payload = get_stock_quote(ticker, reports_root=reports_root)
+    result = {
+        **quote_payload,
+        "chart_range": chart_payload["chart_range"],
+        "chart": chart_payload["chart"],
         "reports": reports,
     }
-    _overview_cache[cache_key] = (time.monotonic(), result)
+    if use_cache:
+        _overview_cache[cache_key] = (time.monotonic(), result)
     return result

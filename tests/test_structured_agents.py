@@ -10,14 +10,15 @@ so they share the same deterministic output shape.
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
 from fxxkstock.agents.analysts.sentiment_analyst import create_sentiment_analyst
 from fxxkstock.agents.managers.research_manager import create_research_manager
 from fxxkstock.agents.schemas import (
+    ConfidenceLevel,
     PortfolioDecision,
     PortfolioRating,
-    ConfidenceLevel,
     ResearchPlan,
     SentimentBand,
     SentimentReport,
@@ -98,11 +99,15 @@ class TestNullishFloatCoercion:
             execution_condition="Wait for confirmation.",
             risk_boundary="Rerun if support fails.",
             review_trigger="Review in 5 trading days.",
-            review_nodes=[{
-                "node_type": "review", "trigger_type": "date",
-                "calendar_date": "2026-07-16", "event": None,
+            review_nodes=[
+                {
+                    "node_type": "review",
+                    "trigger_type": "date",
+                    "calendar_date": "2026-07-16",
+                    "event": None,
                 "action": "Review the thesis.",
-            }],
+                }
+            ],
             price_target="N/A",
             data_confidence=ConfidenceLevel.HIGH,
             data_confidence_reason="Fresh data.",
@@ -180,11 +185,22 @@ def test_invoke_structured_falls_back_when_result_is_none():
     plain = MagicMock()
     plain.invoke.return_value = MagicMock(content="FREETEXT")
 
+    diagnostics = {}
     out = invoke_structured_or_freetext(
-        structured, plain, "prompt", render=lambda r: r.rating, agent_name="t"
+        structured,
+        plain,
+        "prompt",
+        render=lambda r: r.rating,
+        agent_name="t",
+        diagnostics=diagnostics,
     )
     assert out == "FREETEXT"
     plain.invoke.assert_called_once()
+    assert diagnostics["structured_attempts"] == 1
+    assert diagnostics["fallback_attempts"] == 1
+    assert diagnostics["model_attempts"] == 2
+    assert diagnostics["fallback_used"] is True
+    assert diagnostics["fallback_reason"] == "ValueError"
 
 
 @pytest.mark.unit
@@ -207,6 +223,11 @@ class TestTraderAgent:
         assert "FINAL TRANSACTION PROPOSAL: **BUY**" in plan
         # The same rendered markdown is also added to messages for downstream agents.
         assert plan in result["messages"][0].content
+        diagnostics = result["trader_diagnostics"]
+        assert diagnostics["model_attempts"] == 1
+        assert diagnostics["fallback_used"] is False
+        assert diagnostics["input_characters"]["investment_plan"] > 0
+        assert result["stage_replay_contexts"]["trader"]
 
     def test_prompt_includes_investment_plan(self):
         captured = {}
@@ -241,8 +262,7 @@ class TestTraderAgent:
 
     def test_falls_back_to_freetext_when_structured_unavailable(self):
         plain_response = (
-            "**Action**: Sell\n\nGuidance cut hits margins.\n\n"
-            "FINAL TRANSACTION PROPOSAL: **SELL**"
+            "**Action**: Sell\n\nGuidance cut hits margins.\n\nFINAL TRANSACTION PROPOSAL: **SELL**"
         )
         llm = MagicMock()
         llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
@@ -279,9 +299,7 @@ def _structured_rm_llm(captured: dict, plan: ResearchPlan | None = None):
             strategic_actions="Hold current position; reassess after earnings.",
         )
     structured = MagicMock()
-    structured.invoke.side_effect = lambda prompt: (
-        captured.__setitem__("prompt", prompt) or plan
-    )
+    structured.invoke.side_effect = lambda prompt: captured.__setitem__("prompt", prompt) or plan
     llm = MagicMock()
     llm.with_structured_output.return_value = structured
     return llm
@@ -303,6 +321,12 @@ class TestResearchManagerAgent:
         assert "**Recommendation**: Overweight" in ip
         assert "**Rationale**: Bull case" in ip
         assert "**Strategic Actions**: Build position" in ip
+        diagnostics = result["research_manager_diagnostics"]
+        assert diagnostics["structured_success"] is True
+        assert diagnostics["model_attempts"] == 1
+        assert diagnostics["fallback_used"] is False
+        assert diagnostics["input_characters"]["prompt"] > 0
+        assert diagnostics["output_characters"] == len(ip)
 
     def test_prompt_uses_5_tier_rating_scale(self):
         """The RM prompt must list all five tiers so the schema enum matches user expectations."""
@@ -315,13 +339,77 @@ class TestResearchManagerAgent:
             assert f"**{tier}**" in prompt, f"missing {tier} in prompt"
 
     def test_falls_back_to_freetext_when_structured_unavailable(self):
-        plain_response = "**Recommendation**: Sell\n\n**Rationale**: ...\n\n**Strategic Actions**: ..."
+        plain_response = (
+            "**Recommendation**: Sell\n\n**Rationale**: ...\n\n**Strategic Actions**: ..."
+        )
         llm = MagicMock()
         llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
         llm.invoke.return_value = MagicMock(content=plain_response)
         rm = create_research_manager(llm)
         result = rm(_make_rm_state())
         assert result["investment_plan"] == plain_response
+        diagnostics = result["research_manager_diagnostics"]
+        assert diagnostics["structured_available"] is False
+        assert diagnostics["fallback_used"] is True
+        assert diagnostics["fallback_reason"] == "structured_output_unavailable"
+
+    def test_reuses_unparsed_raw_text_without_second_model_call(self):
+        raw_plan = (
+            "**Recommendation**: Hold\n\n"
+            "**Rationale**: Evidence is balanced.\n\n"
+            "**Strategic Actions**: Wait for confirmation."
+        )
+        structured = MagicMock()
+        structured.invoke.return_value = {
+            "parsed": None,
+            "raw": AIMessage(content=raw_plan),
+            "parsing_error": ValueError("tool call missing"),
+        }
+        llm = MagicMock()
+        llm.with_structured_output.return_value = structured
+
+        result = create_research_manager(llm)(_make_rm_state())
+
+        assert result["investment_plan"] == raw_plan
+        diagnostics = result["research_manager_diagnostics"]
+        assert diagnostics["structured_success"] is False
+        assert diagnostics["model_attempts"] == 1
+        assert diagnostics["fallback_attempts"] == 0
+        assert diagnostics["fallback_used"] is True
+        assert diagnostics["raw_output_reused"] is True
+        assert diagnostics["raw_response_available"] is True
+        assert diagnostics["raw_content_characters"] == len(raw_plan)
+        llm.invoke.assert_not_called()
+        llm.with_structured_output.assert_called_once_with(
+            ResearchPlan,
+            include_raw=True,
+        )
+
+    def test_empty_raw_response_keeps_original_freetext_fallback(self):
+        structured = MagicMock()
+        structured.invoke.return_value = {
+            "parsed": None,
+            "raw": AIMessage(
+                content="",
+                additional_kwargs={"reasoning_content": "private reasoning"},
+            ),
+            "parsing_error": ValueError("tool call missing"),
+        }
+        fallback_plan = "**Recommendation**: Hold\n\nFallback plan."
+        llm = MagicMock()
+        llm.with_structured_output.return_value = structured
+        llm.invoke.return_value = AIMessage(content=fallback_plan)
+
+        result = create_research_manager(llm)(_make_rm_state())
+
+        assert result["investment_plan"] == fallback_plan
+        diagnostics = result["research_manager_diagnostics"]
+        assert diagnostics["model_attempts"] == 2
+        assert diagnostics["fallback_attempts"] == 1
+        assert diagnostics["raw_output_reused"] is False
+        assert diagnostics["raw_response_available"] is True
+        assert diagnostics["raw_content_characters"] == 0
+        llm.invoke.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -375,16 +463,20 @@ class TestRenderSentimentReport:
     def test_all_six_bands_render(self):
         for band in SentimentBand:
             report = SentimentReport(
-                overall_band=band, overall_score=5.0,
-                confidence="medium", narrative="n",
+                overall_band=band,
+                overall_score=5.0,
+                confidence="medium",
+                narrative="n",
             )
             assert band.value in render_sentiment_report(report)
 
     def test_score_out_of_range_rejected(self):
         with pytest.raises(ValidationError):
             SentimentReport(
-                overall_band=SentimentBand.BULLISH, overall_score=11.0,
-                confidence="high", narrative="n",
+                overall_band=SentimentBand.BULLISH,
+                overall_score=11.0,
+                confidence="high",
+                narrative="n",
             )
 
 
@@ -402,26 +494,45 @@ def _structured_sentiment_llm(captured: dict, report: SentimentReport | None = N
     a real SentimentReport so render_sentiment_report works."""
     if report is None:
         report = SentimentReport(
-            overall_band=SentimentBand.BULLISH, overall_score=7.5,
+            overall_band=SentimentBand.BULLISH,
+            overall_score=7.5,
             confidence="high",
             narrative="StockTwits 75% bullish. News constructive. Reddit upbeat.",
         )
     structured = MagicMock()
-    structured.invoke.side_effect = lambda prompt: (
-        captured.__setitem__("prompt", prompt) or report
-    )
+    structured.invoke.side_effect = lambda prompt: captured.__setitem__("prompt", prompt) or report
     llm = MagicMock()
     llm.with_structured_output.return_value = structured
     return llm
 
 
+@pytest.fixture
+def _mock_sentiment_sources(monkeypatch):
+    """Keep structured-agent unit tests independent of live data vendors."""
+    monkeypatch.setattr(
+        "fxxkstock.agents.analysts.sentiment_analyst.get_news.func",
+        lambda ticker, start, end: "Mock news",
+    )
+    monkeypatch.setattr(
+        "fxxkstock.agents.analysts.sentiment_analyst.fetch_stocktwits_messages",
+        lambda ticker, limit=30: "Mock StockTwits",
+    )
+    monkeypatch.setattr(
+        "fxxkstock.agents.analysts.sentiment_analyst.fetch_reddit_posts",
+        lambda ticker: "Mock Reddit",
+    )
+
+
 @pytest.mark.unit
+@pytest.mark.usefixtures("_mock_sentiment_sources")
 class TestSentimentAnalystAgent:
     def test_structured_path_produces_rendered_markdown(self):
         captured = {}
         report = SentimentReport(
-            overall_band=SentimentBand.MILDLY_BEARISH, overall_score=4.0,
-            confidence="medium", narrative="Mixed signals across sources.",
+            overall_band=SentimentBand.MILDLY_BEARISH,
+            overall_score=4.0,
+            confidence="medium",
+            narrative="Mixed signals across sources.",
         )
         analyst = create_sentiment_analyst(_structured_sentiment_llm(captured, report))
         sr = analyst(_make_sentiment_state())["sentiment_report"]
@@ -481,9 +592,7 @@ class TestSentimentAnalystAgent:
         )
         monkeypatch.setattr(
             "fxxkstock.agents.analysts.sentiment_analyst.fetch_cn_community",
-            lambda t, limit=None, as_of_date=None: (
-                f"Guba and NGA posts here (as of {as_of_date})"
-            ),
+            lambda t, limit=None, as_of_date=None: f"Guba and NGA posts here (as of {as_of_date})",
         )
         monkeypatch.setattr(
             "fxxkstock.agents.analysts.sentiment_analyst.fetch_cninfo_announcements",

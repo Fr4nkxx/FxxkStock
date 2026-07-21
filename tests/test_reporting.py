@@ -44,13 +44,15 @@ def test_write_report_tree_persists_calendar_nodes(tmp_path):
         "next_action": "Add",
         "execution_condition": "Break above 1.10 on volume.",
         "risk_boundary": "Close below 1.00.",
-        "review_nodes": [{
+        "review_nodes": [
+            {
             "node_type": "review",
             "trigger_type": "date",
             "calendar_date": "2026-07-13",
             "event": None,
             "action": "Run FC01 test.",
-        }],
+            }
+        ],
     }
 
     write_report_tree(state, "159819.SZ", tmp_path)
@@ -59,9 +61,7 @@ def test_write_report_tree_persists_calendar_nodes(tmp_path):
     assert payload["ticker"] == "159819.SZ"
     assert payload["analysis_date"] == "2026-07-11"
     assert payload["nodes"][0]["calendar_date"] == "2026-07-13"
-    assert {item["node_type"] for item in payload["nodes"]} == {
-        "review", "execution", "risk"
-    }
+    assert {item["node_type"] for item in payload["nodes"]} == {"review", "execution", "risk"}
 
 
 @pytest.mark.unit
@@ -88,6 +88,18 @@ def test_write_report_tree_persists_anti_bias_audit(tmp_path):
             "blind_bull_argument": "Blind bull E01.",
             "blind_bear_argument": "Blind bear E01.",
             "initial_investment_plan": "INITIAL PLAN",
+            "company_of_interest": "AAPL",
+            "asset_type": "stock",
+            "instrument_context": "Exact AAPL context.",
+            "trade_date": "2026-07-13",
+            "analysis_mode": "full",
+            "position_context": {"status": "flat"},
+            "current_market_snapshot": {"close": 190.0},
+            "stage_replay_contexts": {"portfolio": [{"risk_debate_state": {"history": "risk"}}]},
+            "portfolio_manager_diagnostics": {
+                "agent": "Portfolio Manager",
+                "model_attempts": 1,
+            },
             "final_trade_decision": (
                 "**Data Confidence**: High\n"
                 "**Data Confidence Reason**: Fresh.\n"
@@ -104,10 +116,20 @@ def test_write_report_tree_persists_anti_bias_audit(tmp_path):
     assert payload["confidence"]["execution"]["level"] == "Low"
     assert payload["evidence_ledger"]["claims"][0]["claim_id"] == "E01"
     assert (tmp_path / "6_audit" / "evidence_ledger.json").is_file()
+    replay = json.loads((tmp_path / "6_audit" / "replay_context.json").read_text())
+    assert replay["ticker"] == "AAPL"
+    assert replay["instrument_context"] == "Exact AAPL context."
+    assert replay["trade_date"] == "2026-07-13"
+    assert replay["version"] == 2
+    assert replay["position_context"] == {"status": "flat"}
+    assert replay["stage_replay_contexts"]["portfolio"]
+    assert (
+        payload["performance_diagnostics"]["portfolio_manager_diagnostics"]["model_attempts"] == 1
+    )
     assert (tmp_path / "2_research" / "blind_bull.md").is_file()
     assert (tmp_path / "2_research" / "blind_bear.md").is_file()
     assert (tmp_path / "6_audit" / "research_manager_initial.md").read_text() == "INITIAL PLAN"
-    assert "Anti-Bias Audit" in out.read_text()
+    assert "Anti-Bias Audit" in out.read_text(encoding="utf-8")
 
 
 @pytest.mark.unit
@@ -125,7 +147,7 @@ def test_report_has_deterministic_account_position_section(tmp_path):
         "unrealized_return_pct": 15.3209,
     }
 
-    report = write_report_tree(state, "159819.SZ", tmp_path).read_text()
+    report = write_report_tree(state, "159819.SZ", tmp_path).read_text(encoding="utf-8")
 
     assert "本次账户持仓 / Account Position" in report
     assert "| 持股数量 | 3,800 |" in report
@@ -142,14 +164,16 @@ def test_unknown_position_is_omitted_from_report():
 
 @pytest.mark.unit
 def test_cost_only_position_report_omits_quantity_and_money_values():
-    report = render_account_position_section({
+    report = render_account_position_section(
+        {
         "status": "held",
         "quantity": None,
         "average_cost": 1.932,
         "current_price": 2.228,
         "currency": "CNY",
         "unrealized_return_pct": 15.3209,
-    })
+        }
+    )
 
     assert "持股数量" not in report
     assert "当前市值" not in report

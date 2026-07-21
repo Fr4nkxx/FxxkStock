@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from langchain_core.output_parsers import PydanticOutputParser
+
 from fxxkstock.agents.schemas import ResearchPlan, render_research_plan
 from fxxkstock.agents.utils.agent_utils import (
     get_instrument_context_from_state,
@@ -14,16 +16,20 @@ from fxxkstock.agents.utils.structured import (
 
 
 def create_research_manager(llm):
-    structured_llm = bind_structured(llm, ResearchPlan, "Research Manager")
+    structured_llm = bind_structured(
+        llm,
+        ResearchPlan,
+        "Research Manager",
+        include_raw=True,
+    )
+    raw_parser = PydanticOutputParser(pydantic_object=ResearchPlan)
 
     def research_manager_node(state) -> dict:
         instrument_context = get_instrument_context_from_state(state)
         history = state["investment_debate_state"].get("history", "")
 
         investment_debate_state = state["investment_debate_state"]
-        researchability = (state.get("researchability_assessment") or {}).get(
-            "markdown", ""
-        )
+        researchability = (state.get("researchability_assessment") or {}).get("markdown", "")
         evidence_ledger = (state.get("evidence_ledger") or {}).get("markdown", "")
         blind_bull = state.get("blind_bull_argument", "")
         blind_bear = state.get("blind_bear_argument", "")
@@ -63,12 +69,26 @@ Calibrate certainty to the assessment, but do not treat sparse information as
 automatic bearish evidence. Explicitly distinguish conclusions both sides
 reached independently from consensus or concessions formed after cross-examination.""" + get_report_instructions()
 
+        diagnostics = {
+            "input_characters": {
+                "prompt": len(prompt),
+                "instrument_context": len(instrument_context),
+                "debate_history": len(history),
+                "blind_bull": len(blind_bull),
+                "blind_bear": len(blind_bear),
+                "evidence_ledger": len(evidence_ledger),
+                "researchability": len(researchability),
+            }
+        }
         investment_plan = invoke_structured_or_freetext(
             structured_llm,
             llm,
             prompt,
             render_research_plan,
             "Research Manager",
+            diagnostics=diagnostics,
+            raw_parser=raw_parser.parse,
+            reuse_raw_response=True,
         )
 
         new_investment_debate_state = {
@@ -83,6 +103,7 @@ reached independently from consensus or concessions formed after cross-examinati
         return {
             "investment_debate_state": new_investment_debate_state,
             "investment_plan": investment_plan,
+            "research_manager_diagnostics": diagnostics,
         }
 
     return research_manager_node

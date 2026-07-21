@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import urlparse
 
 StructuredMethod = Literal[
     "function_calling",  # uses tools; respects supports_tool_choice
@@ -124,3 +125,51 @@ def get_capabilities(model_name: str) -> ModelCapabilities:
         if pattern.match(model_name):
             return caps
     return _DEFAULT
+
+
+def resolve_falsification_structured_method(
+    *,
+    requested: str | None,
+    provider: str,
+    model: str,
+    backend_url: str | None = None,
+) -> StructuredMethod | None:
+    """Resolve the provider-specific transport for the falsification schema.
+
+    ``auto`` is deliberately conservative: native clients use their schema
+    transport, the benchmarked OpenCode DeepSeek route uses JSON mode, and
+    unknown OpenAI-compatible gateways retain their provider default.
+    """
+    normalized = str(requested or "provider_default").strip().lower()
+    allowed = {
+        "auto",
+        "provider_default",
+        "function_calling",
+        "json_mode",
+        "json_schema",
+    }
+    if normalized not in allowed:
+        raise ValueError(
+            "falsification_structured_method must be auto, provider_default, "
+            "function_calling, json_mode, or json_schema"
+        )
+    if normalized == "provider_default":
+        return None
+    if normalized != "auto":
+        return normalized  # type: ignore[return-value]
+
+    provider_name = provider.strip().lower()
+    if provider_name in {"openai", "azure", "google", "anthropic"}:
+        return "json_schema"
+    if provider_name == "deepseek" and get_capabilities(model).supports_json_mode:
+        return "json_mode"
+    if provider_name == "openai_compatible":
+        raw_url = str(backend_url or "").strip()
+        parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
+        host = (parsed.hostname or "").lower()
+        if (host == "opencode.ai" or host.endswith(".opencode.ai")) and re.match(
+            r"^deepseek-v\d",
+            model.strip().lower(),
+        ):
+            return "json_mode"
+    return None

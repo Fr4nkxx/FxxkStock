@@ -264,7 +264,7 @@ flowchart TD
 
 ## Chrome 自动启动
 
-分析中国市场标的前，系统会检查 `http://127.0.0.1:9222/json/version`。如果没有可用 CDP，会根据用户选择自动启动桌面版 Google Chrome。
+分析中国市场标的前，系统会检查 `http://127.0.0.1:9222/json/version`。如果没有可用 CDP，会根据用户选择自动启动 Google Chrome。默认使用“后台最小化”方式，避免自动抓取东方财富、雪球等页面时抢占桌面焦点。
 
 支持的平台：
 
@@ -278,7 +278,15 @@ Chrome 使用项目专用配置目录：
 browser_data/chrome-profile/
 ```
 
-第一次启动后，可在该 Chrome 窗口登录需要 Cookie 的网站。Chrome 会保持运行，后续分析直接复用。该目录可能包含登录信息，已加入 `.gitignore`，请勿公开或提交。
+设置页提供三种运行方式：
+
+- `background`：后台最小化，默认且推荐；保留真实窗口、登录态和较好的反爬兼容性。
+- `headless`：完全无界面；最安静，但部分登录网站可能拒绝访问或要求重新验证。
+- `visible`：正常显示；适合首次登录、验证码处理和人工排查页面。
+
+第一次登录时可临时切换为 `visible`，完成登录并关闭 Chrome 后再改回
+`background`。登录状态保存在专用 Profile 中。该目录可能包含登录信息，已加入
+`.gitignore`，请勿公开或提交。
 
 中文社区情绪默认同时启用东方财富、雪球和 NGA。NGA 数据来自“大时代”
 版块（`fid=706`），系统会用证券中文名称搜索个股主题，并在可识别时补充行业主题，
@@ -357,8 +365,12 @@ python -m webapp.server
 访问：
 
 ```text
-http://localhost:8000
+http://127.0.0.1:8000
 ```
+
+服务默认只监听本机，因此 Uvicorn 启动提示中的地址可以直接在浏览器访问。
+容器部署或确需从局域网访问时，可设置 `FXXKSTOCK_WEB_HOST=0.0.0.0`，并另行
+配置访问控制与反向代理。
 
 也可以使用安装后的命令：
 
@@ -424,9 +436,12 @@ FXXKSTOCK_OUTPUT_LANGUAGE=Chinese
 | `FXXKSTOCK_LLM_BACKEND_URL` | 自定义兼容接口地址 |
 | `FXXKSTOCK_OUTPUT_LANGUAGE` | 报告语言 |
 | `FXXKSTOCK_CHROME_PLATFORM` | `macos`、`windows` 或 `ubuntu` |
+| `FXXKSTOCK_CHROME_MODE` | `background`、`headless` 或 `visible` |
 | `FXXKSTOCK_CHROME_AUTO_START` | 是否自动启动 Chrome |
 | `FXXKSTOCK_CHROME_EXECUTABLE` | 自定义 Chrome 可执行文件 |
 | `FXXKSTOCK_CHROME_PROFILE_DIR` | 自定义 Chrome Profile 路径 |
+| `FXXKSTOCK_PARALLEL_INITIAL_ANALYSTS` | 是否并行运行四个基础分析师 |
+| `FXXKSTOCK_PARALLEL_BLIND_RESEARCHERS` | 是否并行运行独立多空首评，默认开启 |
 
 ### 4. 启动 CLI
 
@@ -521,6 +536,7 @@ FxxKStock/
 ├── fxxkstock/
 │   ├── agents/                  # 分析、研究、交易和风险智能体
 │   ├── dataflows/               # 行情、新闻、社区和浏览器数据源
+│   ├── diagnostics/             # 历史报告单阶段回放与性能诊断
 │   ├── graph/                   # LangGraph 工作流与运行生命周期
 │   ├── llm_clients/             # 模型供应商适配
 │   ├── default_config.py        # 默认配置
@@ -555,6 +571,41 @@ pytest -q tests/test_playwright_web.py
 ```
 
 涉及真实模型、网络数据或 Chrome 的测试可能需要 API Key、网络和本地浏览器环境。
+
+本轮性能优化的改动、量化结果、边界与后续方向见
+[性能优化阶段总结](docs/performance-optimization-stage-summary.md)。
+
+### 单阶段性能回放
+
+无需重新运行完整分析，可以从已有报告目录重建指定阶段的输入。支持 Evidence
+Ledger、正式 Bull/Bear、Falsification Auditor、Trader、三个风险分析师和
+Portfolio Manager。默认命令只校验输入并统计各部分字符数，不调用模型：
+
+```bash
+python scripts/benchmark_stage.py reports/600353.SS/20260713_105958
+python scripts/benchmark_stage.py reports/600353.SS/20260713_105958 --stage portfolio
+```
+
+确认输入后，显式增加 `--execute` 才会使用当前 `.env` 与默认配置调用模型：
+
+```bash
+python scripts/benchmark_stage.py reports/600353.SS/20260713_105958 --stage portfolio --execute
+```
+
+可通过 `--provider`、`--model` 和 `--backend-url` 临时覆盖模型配置。
+`--execute` 会产生模型请求和相应费用，但不会启动 Chrome、抓取行情或执行其他
+分析节点。新生成的报告会在 `6_audit/replay_context.json` 保存目标阶段调用前的
+精确状态切片，并在 `audit.json` 保存非内容性能诊断。旧报告也可以使用，但
+Bull/Bear 与风险辩论输入只能从分侧报告重建，脚本会明确标记 `reconstructed`。
+多轮阶段可用 `--invocation` 选择已保存的调用，`-1` 表示最后一次。
+
+结构化审计解析失败但模型已返回有效正文或 tool arguments 时，系统复用第一次
+回答作为咨询性审计，不再重复调用模型，也不会据此自动触发 Research Manager
+修订。只有结构化结果校验成功时，原有自动修订规则才会生效。
+
+设置页的“并行独立多空首评（实验）”只并发执行互相隔离的 Blind Bull 与
+Blind Bear 首次判断，完成后按原顺序重建辩论历史。正式 Bull/Bear 交叉质询和
+激进、保守、中性风险辩论仍保持串行，因为后续角色必须读取上一位的回答。
 
 ### 数据源诊断
 

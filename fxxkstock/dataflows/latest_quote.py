@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-import json
 import logging
 import math
+import time
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
+import requests
 import yfinance as yf
 
 from .market_utils import detect_market_region, is_cn_region, to_eastmoney_symbol
@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 _EM_QUOTE_URL = "https://push2.eastmoney.com/api/qt/stock/get"
 _EM_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+_LATEST_QUOTE_CACHE_TTL_SECONDS = 30
+_latest_quote_cache: dict[tuple[str, str], tuple[float, dict[str, Any] | None]] = {}
 
 
 def _finite_float(value: Any) -> float | None:
@@ -89,7 +91,7 @@ def _eastmoney_signed_price(data: dict[str, Any], field: str) -> float | None:
 def fetch_eastmoney_latest_quote(
     ticker: str,
     region: str | None = None,
-    timeout: int = 6,
+    timeout: float = 2.5,
 ) -> dict[str, Any] | None:
     """Return latest quote fields from Eastmoney for CN A/HK symbols."""
     market_region = region or detect_market_region(ticker)
@@ -117,13 +119,30 @@ def fetch_eastmoney_latest_quote(
             ),
         }
     )
-    req = Request(
-        f"{_EM_QUOTE_URL}?{params}",
-        headers={"User-Agent": _EM_UA, "Accept": "application/json"},
-    )
+    url = f"{_EM_QUOTE_URL}?{params}"
+    headers = {
+        "User-Agent": _EM_UA,
+        "Accept": "application/json,text/plain,*/*",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "Referer": "https://quote.eastmoney.com/",
+    }
     try:
-        with urlopen(req, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        last_exc: Exception | None = None
+        # Latest quote is best-effort and has a daily OHLCV fallback. Avoid the
+        # direct no-proxy path here because it can hang for many seconds on
+        # some Windows/proxy networks even when requests' read timeout is low.
+        for trust_env in (True,):
+            try:
+                session = requests.Session()
+                session.trust_env = trust_env
+                response = session.get(url, headers=headers, timeout=timeout)
+                response.raise_for_status()
+                payload = response.json()
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+        else:
+            raise last_exc or RuntimeError("Eastmoney latest quote request failed")
     except Exception as exc:  # noqa: BLE001
         logger.debug("Eastmoney latest quote failed for %s: %s", ticker, exc)
         return None
@@ -214,6 +233,13 @@ def fetch_latest_market_quote(
 ) -> dict[str, Any] | None:
     """Best-effort latest quote. Returns None so callers can fall back cleanly."""
     market_region = region or detect_market_region(ticker)
+    cache_key = (ticker.upper().strip(), market_region)
+    cached = _latest_quote_cache.get(cache_key)
+    if cached and time.monotonic() - cached[0] < _LATEST_QUOTE_CACHE_TTL_SECONDS:
+        return cached[1]
     if market_region in {"cn_a", "cn_hk"}:
-        return fetch_eastmoney_latest_quote(ticker, market_region)
-    return fetch_yfinance_latest_quote(ticker)
+        quote = fetch_eastmoney_latest_quote(ticker, market_region)
+    else:
+        quote = fetch_yfinance_latest_quote(ticker)
+    _latest_quote_cache[cache_key] = (time.monotonic(), quote)
+    return quote

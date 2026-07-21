@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import functools
 import logging
+from collections.abc import Mapping
 from datetime import datetime, timedelta
-from typing import Any, Mapping
+from typing import Any
 
 import pandas as pd
 import yfinance as yf
@@ -202,6 +203,10 @@ def get_instrument_fx_context(ticker: str, as_of: str) -> tuple[str, float | Non
     """返回 (source_currency, fx_to_cny)；CNY 标的 fx 为 1.0。"""
     from .market_utils import detect_market_region
 
+    region = detect_market_region(ticker)
+    source = detect_source_currency(ticker, None, region)
+    if source == "CNY":
+        return "CNY", 1.0
     identity = _quick_identity_for_currency(ticker)
     region = detect_market_region(ticker, identity)
     source = detect_source_currency(ticker, identity, region)

@@ -90,6 +90,7 @@ class Propagator:
             "initial_investment_plan": "",
             "falsification_audit": {},
             "portfolio_decision_metadata": {},
+            "stage_replay_contexts": {},
         }
 
     def get_graph_args(self, callbacks: list | None = None) -> dict[str, Any]:

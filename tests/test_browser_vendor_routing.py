@@ -40,6 +40,92 @@ def test_cn_browser_disabled_skips_browser():
 
 
 @pytest.mark.unit
+def test_cn_region_keeps_configured_market_data_vendor_by_default():
+    set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
+    set_config({"market_region": "cn_a"})
+
+    chain = _build_vendor_chain(
+        "get_stock_data",
+        explicit=["yfinance"],
+        all_available=["eastmoney", "yfinance"],
+    )
+
+    assert chain == ["yfinance"]
+
+
+@pytest.mark.unit
+def test_cn_region_prepends_eastmoney_for_market_data_when_configured():
+    set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
+    set_config({"market_region": "cn_a", "cn_market_data_source": "eastmoney"})
+
+    chain = _build_vendor_chain(
+        "get_stock_data",
+        explicit=["yfinance"],
+        all_available=["eastmoney", "yfinance"],
+    )
+
+    assert chain == ["eastmoney", "yfinance"]
+
+
+@pytest.mark.unit
+def test_cn_market_data_uses_configured_vendor_by_default():
+    set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
+    set_config({"market_region": "cn_a"})
+    call_order = []
+
+    def fake_eastmoney(ticker, start, end):
+        call_order.append("eastmoney")
+        return f"eastmoney data for {ticker}"
+
+    def fake_yfinance(ticker, start, end):
+        call_order.append("yfinance")
+        return "yf"
+
+    with patch.dict(
+        "fxxkstock.dataflows.interface.VENDOR_METHODS",
+        {
+            "get_stock_data": {
+                "eastmoney": fake_eastmoney,
+                "yfinance": fake_yfinance,
+            }
+        },
+    ):
+        out = route_to_vendor("get_stock_data", "002364.SZ", "2026-07-01", "2026-07-07")
+
+    assert out == "yf"
+    assert call_order == ["yfinance"]
+
+
+@pytest.mark.unit
+def test_cn_market_data_uses_eastmoney_before_yfinance_when_configured():
+    set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
+    set_config({"market_region": "cn_a", "cn_market_data_source": "eastmoney"})
+    call_order = []
+
+    def fake_eastmoney(ticker, start, end):
+        call_order.append("eastmoney")
+        return f"eastmoney data for {ticker}"
+
+    def fake_yfinance(ticker, start, end):
+        call_order.append("yfinance")
+        return "yf"
+
+    with patch.dict(
+        "fxxkstock.dataflows.interface.VENDOR_METHODS",
+        {
+            "get_stock_data": {
+                "eastmoney": fake_eastmoney,
+                "yfinance": fake_yfinance,
+            }
+        },
+    ):
+        out = route_to_vendor("get_stock_data", "002364.SZ", "2026-07-01", "2026-07-07")
+
+    assert out == "eastmoney data for 002364.SZ"
+    assert call_order == ["eastmoney"]
+
+
+@pytest.mark.unit
 def test_browser_unavailable_falls_back_to_eastmoney():
     set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
     set_config({"market_region": "cn_a", "cn_browser_enabled": True})

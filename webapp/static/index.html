@@ -1119,6 +1119,7 @@
             <button class="position-btn" type="button" data-position-status="held">持有</button>
           </div></div>
           <div class="field hidden" id="averageCostField"><label>持仓成本价</label><input id="positionAverageCost" type="number" min="0.000001" step="any" inputmode="decimal" placeholder="按股票自动记住" /></div>
+          <div class="field hidden" id="quantityField"><label>持股数量（可选）</label><input id="positionQuantity" type="number" min="0.000001" step="any" inputmode="decimal" placeholder="用于计算持仓市值与盈亏" /></div>
           <div class="field"><label>Chrome 平台</label><select id="chromePlatform"><option value="macos">macOS</option><option value="windows">Windows</option><option value="ubuntu">Ubuntu</option></select></div>
           <div class="field"><label>浏览器数据</label><label class="toggle"><input id="chromeAutoStart" type="checkbox" checked />自动启动 Chrome</label></div>
         </div>
@@ -1157,6 +1158,7 @@
     const ACTIVE_RUNS_KEY = "fxxkstock.activeRuns";
     const SELECTED_TICKER_KEY = "fxxkstock.selectedTicker";
     const WATCHLIST_KEY = "fxxkstock.watchlist.v1";
+    const RUN_LOGS_KEY = "fxxkstock.runLogs.v1";
     const POSITION_COSTS_KEY = "fxxkstock.positionCosts.v1";
     const STAGE_DEFS = [
       ["market", "Market", "行情"],
@@ -1171,6 +1173,7 @@
     let stockGroups = [];
     let watchlist = readJson(WATCHLIST_KEY, []);
     let activeRuns = readJson(ACTIVE_RUNS_KEY, {});
+    let runLogs = readJson(RUN_LOGS_KEY, {});
     let selectedTicker = null;
     let selectedReportId = null;
     let selectedMode = "simple";
@@ -1206,10 +1209,12 @@
       positionStatus = status;
       document.querySelectorAll(".position-btn").forEach((item) => item.classList.toggle("active", item.dataset.positionStatus === status));
       $("averageCostField").classList.toggle("hidden", status !== "held");
+      $("quantityField").classList.toggle("hidden", status !== "held");
     }
     function restorePositionCost(ticker = $("ticker").value) {
       const cost = Number(readJson(POSITION_COSTS_KEY, {})[positionCostTicker(ticker)]);
       $("positionAverageCost").value = cost > 0 ? String(cost) : "";
+      $("positionQuantity").value = "";
       applyPositionStatus(cost > 0 ? "held" : "unknown");
     }
     function icons() { if (window.lucide) lucide.createIcons(); }
@@ -1309,10 +1314,44 @@
     }
     function openModal(id) { $(id).classList.add("open"); }
     function closeModal(id) { $(id).classList.remove("open"); }
+    function eventTimestamp(item) {
+      if (item.ts) return item.ts;
+      if (item.emitted_at) return new Date(item.emitted_at).toLocaleTimeString();
+      return "--:--:--";
+    }
+    function renderEventLog() {
+      $("debugLog").textContent = eventLog.map((item) =>
+        `[${eventTimestamp(item)}] ${item.type || "event"} ${item.message || item.label || item.section || ""}`
+      ).join("\n") || "暂无运行日志";
+    }
     function logEvent(data) {
       eventLog.push({ ts: new Date().toLocaleTimeString(), ...data });
       eventLog = eventLog.slice(-220);
-      $("debugLog").textContent = eventLog.map((item) => `[${item.ts}] ${item.type || "event"} ${item.message || item.label || item.section || ""}`).join("\n") || "暂无运行日志";
+      renderEventLog();
+    }
+    function saveRunLogs() {
+      localStorage.setItem(RUN_LOGS_KEY, JSON.stringify(runLogs));
+    }
+    async function loadRunLog(runId = currentRunId) {
+      const url = runId
+        ? `/api/runs/${encodeURIComponent(runId)}/debug-log`
+        : selectedTicker
+          ? `/api/runs/debug-log/latest?ticker=${encodeURIComponent(selectedTicker)}`
+          : "";
+      if (!url) {
+        renderEventLog();
+        return;
+      }
+      const response = await fetch(url);
+      if (!response.ok) {
+        renderEventLog();
+        return;
+      }
+      const data = await response.json();
+      if (Array.isArray(data.events) && data.events.length) {
+        eventLog = data.events.slice(-220);
+      }
+      renderEventLog();
     }
     function saveActiveRuns() {
       localStorage.setItem(ACTIVE_RUNS_KEY, JSON.stringify(activeRuns));
@@ -1549,18 +1588,62 @@
       values.forEach((value, index) => index ? ctx.lineTo(x(index), y(value)) : ctx.moveTo(x(index), y(value)));
       ctx.strokeStyle = color; ctx.lineWidth = 1.8; ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.stroke();
     }
+    function baseOverview(ticker, range = "1d") {
+      return {
+        ticker,
+        name: ticker,
+        chart_range: range,
+        chart: [],
+        quote: {},
+        reports: [],
+      };
+    }
+    function mergeOverviewPart(ticker, patch = {}) {
+      if (selectedTicker !== ticker) return;
+      const previous = currentOverview && currentOverview.ticker === ticker
+        ? currentOverview
+        : baseOverview(ticker, patch.chart_range || "1d");
+      currentOverview = {
+        ...previous,
+        ...patch,
+        quote: patch.quote ? { ...(previous.quote || {}), ...patch.quote } : (previous.quote || {}),
+        chart: Array.isArray(patch.chart) ? patch.chart : (previous.chart || []),
+        reports: Array.isArray(patch.reports) ? patch.reports : (previous.reports || []),
+      };
+      renderOverview(currentOverview);
+    }
+    async function fetchJson(url) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`请求失败 (${response.status})`);
+      return response.json();
+    }
     async function loadOverview(range = "1d") {
       if (!selectedTicker) return;
       const ticker = selectedTicker;
-      const response = await fetch(`/api/stocks/${encodeURIComponent(ticker)}/overview?range=${range}`);
-      if (!response.ok) return;
-      const overview = await response.json();
-      if (selectedTicker === ticker) renderOverview(overview);
+      mergeOverviewPart(ticker, { ...baseOverview(ticker, range), chart_range: range, chart: [] });
+      $("chartEmpty").textContent = "行情图表加载中...";
+      const encoded = encodeURIComponent(ticker);
+      const quotePromise = fetchJson(`/api/stocks/${encoded}/quote`)
+        .then((data) => mergeOverviewPart(ticker, data))
+        .catch(() => {});
+      const reportsPromise = fetchJson(`/api/stocks/${encoded}/reports?limit=1000`)
+        .then((data) => mergeOverviewPart(ticker, { reports: data.reports || [] }))
+        .catch(() => {});
+      const chartPromise = fetchJson(`/api/stocks/${encoded}/chart?range=${range}`)
+        .then((data) => {
+          $("chartEmpty").textContent = "暂无价格序列";
+          mergeOverviewPart(ticker, data);
+        })
+        .catch(() => { if (selectedTicker === ticker) $("chartEmpty").textContent = "行情图表暂不可用"; });
+      await Promise.allSettled([quotePromise, reportsPromise]);
     }
     async function selectStock(ticker) {
       if (eventSource) { eventSource.close(); eventSource = null; }
       selectedTicker = String(ticker || "").toUpperCase();
       localStorage.setItem(SELECTED_TICKER_KEY, selectedTicker);
+      currentRunId = activeRuns[selectedTicker]?.runId || runLogs[selectedTicker] || null;
+      eventLog = [];
+      renderEventLog();
       renderStockList();
       renderPinState();
       $("ticker").value = selectedTicker;
@@ -1942,6 +2025,8 @@
     }
     async function completeRun(run) {
       clearInterval(elapsedTimer);
+      runLogs[run.ticker] = run.runId;
+      saveRunLogs();
       delete activeRuns[run.ticker];
       saveActiveRuns();
       eventSource?.close(); eventSource = null;
@@ -2099,12 +2184,22 @@
         position = { status: "flat" };
       } else if (positionStatus === "held") {
         const averageCost = Number($("positionAverageCost").value);
+        const quantityText = $("positionQuantity").value.trim();
+        const quantity = Number(quantityText);
         if (!(averageCost > 0)) {
           alert("持有状态需要填写大于 0 的持仓成本价。");
           return;
         }
+        if (quantityText && !(quantity > 0)) {
+          alert("持股数量留空或填写大于 0 的数值。");
+          return;
+        }
         savePositionCost(ticker, averageCost);
-        position = { status: "held", average_cost: averageCost };
+        position = {
+          status: "held",
+          average_cost: averageCost,
+          ...(quantity > 0 ? { quantity } : {}),
+        };
       }
       closeModal("analysisModal");
       selectedTicker = ticker.toUpperCase();
@@ -2133,6 +2228,8 @@
         clearInterval(elapsedTimer); $("runBtn").disabled = false; return;
       }
       currentRunId = (await response.json()).run_id;
+      runLogs[selectedTicker] = currentRunId;
+      saveRunLogs();
       const run = {
         runId: currentRunId,
         ticker: selectedTicker,
@@ -2184,7 +2281,10 @@
     $("pinTickerBtn").addEventListener("click", togglePinned);
     $("themeToggle").addEventListener("click", toggleTheme);
     $("settingsBtn").addEventListener("click", () => { window.location.href = "/settings"; });
-    $("debugBtn").addEventListener("click", () => openModal("debugModal"));
+    $("debugBtn").addEventListener("click", async () => {
+      await loadRunLog(currentRunId || (selectedTicker && runLogs[selectedTicker]));
+      openModal("debugModal");
+    });
     $("exportBtn").addEventListener("click", exportReport);
     $("runBtn").addEventListener("click", startRun);
     $("provider").addEventListener("change", refreshModels);

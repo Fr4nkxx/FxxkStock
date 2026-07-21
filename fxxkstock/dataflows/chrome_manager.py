@@ -19,9 +19,13 @@ from urllib.request import ProxyHandler, Request, build_opener
 logger = logging.getLogger(__name__)
 
 SUPPORTED_PLATFORMS = ("macos", "windows", "ubuntu")
+SUPPORTED_BROWSER_MODES = ("background", "headless", "visible")
+_SW_HIDE = 0
+_SW_SHOWMINNOACTIVE = 7
 _START_LOCK = threading.Lock()
 _STARTED_PROCESS: subprocess.Popen | None = None
 _STARTED_PLATFORM: str | None = None
+_STARTED_MODE: str | None = None
 _ACTIVE_LEASES = 0
 _DIRECT_OPENER = build_opener(ProxyHandler({}))
 
@@ -39,6 +43,9 @@ class ChromeManager:
         cfg = config or {}
         self.platform = str(cfg.get("cn_browser_platform") or current_platform()).lower()
         self.executable = cfg.get("cn_browser_executable")
+        self.mode = str(cfg.get("cn_browser_mode") or "background").lower()
+        if self.mode not in SUPPORTED_BROWSER_MODES:
+            raise ValueError(f"unsupported Chrome mode: {self.mode}")
         self.profile_dir = Path(
             cfg.get("cn_browser_profile_dir", "browser_data/chrome-profile")
         ).expanduser()
@@ -82,8 +89,7 @@ class ChromeManager:
                 os.environ.get("LOCALAPPDATA"),
             ]
             candidates = [
-                Path(root) / "Google/Chrome/Application/chrome.exe"
-                for root in roots if root
+                Path(root) / "Google/Chrome/Application/chrome.exe" for root in roots if root
             ]
             return next((path for path in candidates if path.is_file()), None)
 
@@ -100,7 +106,7 @@ class ChromeManager:
     def build_command(self, executable: Path) -> list[str]:
         parsed = urlparse(self.cdp_url)
         port = parsed.port or 9222
-        return [
+        command = [
             str(executable),
             "--remote-debugging-address=127.0.0.1",
             f"--remote-debugging-port={port}",
@@ -108,20 +114,34 @@ class ChromeManager:
             "--no-first-run",
             "--no-default-browser-check",
         ]
+        if self.mode == "background":
+            command.append("--start-minimized")
+        elif self.mode == "headless":
+            command.extend(
+                [
+                    "--headless=new",
+                    "--disable-gpu",
+                    "--window-size=1920,1080",
+                ]
+            )
+        return command
 
     def status(self) -> dict[str, Any]:
-        global _STARTED_PROCESS, _STARTED_PLATFORM, _ACTIVE_LEASES
+        global _STARTED_PROCESS, _STARTED_PLATFORM, _STARTED_MODE, _ACTIVE_LEASES
         running = self.is_cdp_available()
-        managed = bool(
-            running
-            and _STARTED_PROCESS is not None
-            and _STARTED_PROCESS.poll() is None
-        )
+        managed = bool(running and _STARTED_PROCESS is not None and _STARTED_PROCESS.poll() is None)
         return {
             "available": running,
             "platform": self.platform,
             "managed": managed,
             "managed_platform": _STARTED_PLATFORM if managed else None,
+            "mode": self.mode,
+            "managed_mode": _STARTED_MODE if managed else None,
+            "window_behavior": {
+                "headless": "no_window",
+                "background": "minimized_best_effort",
+                "visible": "visible",
+            }[self.mode],
             "cdp_url": self.cdp_url,
             "active_leases": _ACTIVE_LEASES if managed else 0,
             "profile_dir": str(self.profile_dir.resolve()),
@@ -167,7 +187,7 @@ class ChromeManager:
             return False
 
     def ensure_running(self) -> dict[str, Any]:
-        global _STARTED_PROCESS, _STARTED_PLATFORM, _ACTIVE_LEASES
+        global _STARTED_PROCESS, _STARTED_PLATFORM, _STARTED_MODE, _ACTIVE_LEASES
         with _START_LOCK:
             if self.is_cdp_available():
                 if _STARTED_PROCESS is not None and _STARTED_PROCESS.poll() is None:
@@ -209,10 +229,16 @@ class ChromeManager:
             child_env["no_proxy"] = bypass_value
             kwargs["env"] = child_env
             if self.platform == "windows":
-                kwargs["creationflags"] = (
-                    getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                    | getattr(subprocess, "DETACHED_PROCESS", 0)
+                kwargs["creationflags"] = getattr(
+                    subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+                ) | getattr(subprocess, "DETACHED_PROCESS", 0)
+                if self.mode != "visible":
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startupinfo.wShowWindow = (
+                        _SW_HIDE if self.mode == "headless" else _SW_SHOWMINNOACTIVE
                 )
+                    kwargs["startupinfo"] = startupinfo
             else:
                 kwargs["start_new_session"] = True
 
@@ -226,6 +252,7 @@ class ChromeManager:
                 }
             _STARTED_PROCESS = process
             _STARTED_PLATFORM = self.platform
+            _STARTED_MODE = self.mode
             _ACTIVE_LEASES = 1
 
             deadline = time.monotonic() + max(0.1, self.timeout)
@@ -237,7 +264,14 @@ class ChromeManager:
                         "message": f"Google Chrome exited with code {process.returncode}",
                     }
                 if self.is_cdp_available():
-                    return {**self.status(), "state": "ready"}
+                    status = self.status()
+                    return {
+                        **status,
+                        "state": "ready",
+                        "message": (
+                            f"Google Chrome ready in {self.mode} mode ({status['window_behavior']})"
+                        ),
+                    }
                 time.sleep(0.2)
 
             return {
@@ -248,7 +282,7 @@ class ChromeManager:
 
     def close_managed(self) -> dict[str, Any]:
         """Release this run's Chrome lease and stop the managed process at zero."""
-        global _STARTED_PROCESS, _STARTED_PLATFORM, _ACTIVE_LEASES
+        global _STARTED_PROCESS, _STARTED_PLATFORM, _STARTED_MODE, _ACTIVE_LEASES
         with _START_LOCK:
             process = _STARTED_PROCESS
             if process is None:
@@ -286,6 +320,7 @@ class ChromeManager:
             finally:
                 _STARTED_PROCESS = None
                 _STARTED_PLATFORM = None
+                _STARTED_MODE = None
                 _ACTIVE_LEASES = 0
 
             return {
@@ -293,6 +328,8 @@ class ChromeManager:
                 "platform": self.platform,
                 "managed": False,
                 "managed_platform": None,
+                "mode": self.mode,
+                "managed_mode": None,
                 "cdp_url": self.cdp_url,
                 "state": "closed",
             }

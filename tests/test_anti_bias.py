@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from fxxkstock.agents.managers.anti_bias import (
     create_falsification_auditor,
@@ -10,17 +11,15 @@ from fxxkstock.agents.managers.anti_bias import (
     create_researchability_assessor,
 )
 from fxxkstock.agents.schemas import (
-    ConfidenceLevel,
     FalsificationAudit,
-    InformationGrade,
     PortfolioRating,
     ResearchabilityAssessment,
     ResearchPlan,
     render_falsification_audit,
     render_researchability,
 )
-from fxxkstock.graph.conditional_logic import ConditionalLogic
 from fxxkstock.agents.utils.ticker_memory import TickerMemoryStore
+from fxxkstock.graph.conditional_logic import ConditionalLogic
 
 
 def _state():
@@ -85,6 +84,11 @@ def test_critical_falsification_finding_forces_single_revision_route():
     payload = result["falsification_audit"]
     assert payload["requires_revision"] is True
     assert result["initial_investment_plan"] == "**Recommendation**: Buy"
+    diagnostics = result["falsification_auditor_diagnostics"]
+    assert diagnostics["structured_success"] is True
+    assert diagnostics["model_attempts"] == 1
+    assert diagnostics["fallback_used"] is False
+    assert diagnostics["input_characters"]["prompt"] > 0
     assert (
         ConditionalLogic().should_revise_research(result)
         == "Research Manager Revision"
@@ -100,7 +104,129 @@ def test_unstructured_audit_is_advisory_and_does_not_auto_revise():
     result = create_falsification_auditor(llm)(_state())
     assert result["falsification_audit"]["status"] == "unavailable"
     assert result["falsification_audit"]["requires_revision"] is False
+    diagnostics = result["falsification_auditor_diagnostics"]
+    assert diagnostics["structured_available"] is False
+    assert diagnostics["fallback_used"] is True
+    assert diagnostics["fallback_reason"] == "structured_output_unavailable"
     assert ConditionalLogic().should_revise_research(result) == "Trader"
+
+
+@pytest.mark.unit
+def test_falsification_diagnostics_record_structured_failure_and_fallback():
+    structured = MagicMock()
+    structured.invoke.side_effect = ValueError("structured output returned no result")
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+    llm.invoke.return_value = MagicMock(content="Free-text challenge.")
+
+    result = create_falsification_auditor(llm)(_state())
+
+    diagnostics = result["falsification_auditor_diagnostics"]
+    assert diagnostics["structured_attempts"] == 1
+    assert diagnostics["fallback_attempts"] == 1
+    assert diagnostics["model_attempts"] == 2
+    assert diagnostics["fallback_used"] is True
+    assert diagnostics["fallback_reason"] == "ValueError"
+
+
+@pytest.mark.unit
+def test_falsification_recovers_structured_audit_from_raw_json():
+    structured = MagicMock()
+    structured.invoke.return_value = {
+        "parsed": None,
+        "raw": AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "FalsificationAudit",
+                    "args": {
+                        "strongest_counter_thesis": "Demand may reverse.",
+                        "conflicting_or_ignored_evidence": [],
+                        "hidden_assumptions": [],
+                        "bias_flags": [],
+                        "falsification_triggers": ["Revenue misses"],
+                        "critical_findings": [
+                            "A decisive claim lacks support."
+                        ],
+                        "requires_revision": False,
+                        "revision_instructions": ["Reduce conviction."],
+                    },
+                    "id": "call-1",
+                    "type": "tool_call",
+                }
+            ],
+        ),
+        "parsing_error": ValueError("tool call missing"),
+    }
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+
+    result = create_falsification_auditor(llm)(_state())
+
+    assert result["falsification_audit"]["status"] == "available"
+    assert result["falsification_audit"]["requires_revision"] is True
+    diagnostics = result["falsification_auditor_diagnostics"]
+    assert diagnostics["structured_recovered_from_raw"] is True
+    assert diagnostics["model_attempts"] == 1
+    assert diagnostics["fallback_used"] is False
+    llm.invoke.assert_not_called()
+
+
+@pytest.mark.unit
+def test_falsification_reuses_unparsed_raw_response_without_second_call():
+    structured = MagicMock()
+    structured.invoke.return_value = {
+        "parsed": None,
+        "raw": AIMessage(content="A useful free-text counter-case."),
+        "parsing_error": ValueError("tool call missing; token=secret-value"),
+    }
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+
+    result = create_falsification_auditor(llm)(_state())
+
+    assert result["falsification_audit"]["status"] == "unavailable"
+    assert result["falsification_audit"]["requires_revision"] is False
+    assert "A useful free-text counter-case." in result["falsification_audit"][
+        "markdown"
+    ]
+    diagnostics = result["falsification_auditor_diagnostics"]
+    assert diagnostics["model_attempts"] == 1
+    assert diagnostics["fallback_attempts"] == 0
+    assert diagnostics["fallback_used"] is True
+    assert diagnostics["raw_output_reused"] is True
+    assert diagnostics["fallback_reason"] == "structured_output_unparsed"
+    assert "secret-value" not in diagnostics["fallback_error"]
+    llm.invoke.assert_not_called()
+
+
+@pytest.mark.unit
+def test_falsification_json_mode_is_explicit_and_schema_guided():
+    audit = FalsificationAudit(
+        strongest_counter_thesis="Demand may reverse.",
+        requires_revision=False,
+    )
+    structured = MagicMock()
+    structured.invoke.return_value = audit
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+
+    result = create_falsification_auditor(
+        llm,
+        structured_method="json_mode",
+    )(_state())
+
+    llm.with_structured_output.assert_called_once_with(
+        FalsificationAudit,
+        include_raw=True,
+        method="json_mode",
+    )
+    prompt = structured.invoke.call_args.args[0]
+    assert "Return exactly one JSON object" in prompt
+    assert '"strongest_counter_thesis"' in prompt
+    assert result["falsification_auditor_diagnostics"]["structured_method"] == (
+        "json_mode"
+    )
 
 
 @pytest.mark.unit

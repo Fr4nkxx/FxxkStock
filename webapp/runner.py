@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import queue
 import re
 import threading
+import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -20,6 +21,9 @@ from fxxkstock.agents.utils.structured import bind_structured
 from fxxkstock.dataflows.utils import safe_ticker_component
 from fxxkstock.default_config import DEFAULT_CONFIG
 from fxxkstock.graph.fxxkstock_graph import FxxKStockGraph
+from fxxkstock.llm_clients.capabilities import (
+    resolve_falsification_structured_method,
+)
 from fxxkstock.reporting import write_report_tree
 
 logger = logging.getLogger(__name__)
@@ -99,6 +103,13 @@ def build_run_config(params: RunParams) -> dict[str, Any]:
     config["quick_think_llm"] = params.quick_model
     config["deep_think_llm"] = params.deep_model
     config["checkpoint_enabled"] = False
+    effective_method = resolve_falsification_structured_method(
+        requested=config.get("falsification_structured_method"),
+        provider=config["llm_provider"],
+        model=config["deep_think_llm"],
+        backend_url=config.get("backend_url"),
+    )
+    config["falsification_structured_method_effective"] = effective_method or "provider_default"
     if params.chrome_platform:
         if params.chrome_platform not in {"macos", "windows", "ubuntu"}:
             raise ValueError("unsupported Chrome platform")
@@ -195,8 +206,242 @@ def _classify_message(message) -> tuple[str, str | None]:
 
 
 def _emit(state: RunState, event: dict[str, Any]) -> None:
+    if "emitted_at" not in event:
+        event = {
+            "emitted_at": datetime.now().isoformat(timespec="seconds"),
+            **event,
+        }
     state.debug_events.append(event)
     state.event_queue.put(event)
+
+
+def _format_duration(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    total = int(round(seconds))
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:d}:{secs:02d}"
+
+
+def _emit_timing(
+    state: RunState,
+    timings: list[dict[str, Any]],
+    *,
+    label: str,
+    duration_seconds: float,
+    elapsed_seconds: float,
+    category: str,
+) -> None:
+    record = {
+        "label": label,
+        "category": category,
+        "duration_seconds": round(duration_seconds, 3),
+        "elapsed_seconds": round(elapsed_seconds, 3),
+    }
+    timings.append(record)
+    _emit(
+        state,
+        {
+            "type": "timing",
+            **record,
+            "message": (
+                f"{label}: +{_format_duration(duration_seconds)} "
+                f"(total {_format_duration(elapsed_seconds)})"
+            ),
+        },
+    )
+
+
+def _emit_timing_summary(
+    state: RunState,
+    timings: list[dict[str, Any]],
+    *,
+    total_seconds: float,
+    status: str,
+) -> None:
+    ranked = sorted(
+        timings,
+        key=lambda item: float(item.get("duration_seconds") or 0),
+        reverse=True,
+    )
+    slowest = ", ".join(
+        f"{item['label']} {_format_duration(float(item.get('duration_seconds') or 0))}"
+        for item in ranked[:5]
+    )
+    message = f"total {_format_duration(total_seconds)}"
+    if slowest:
+        message += f"; slowest: {slowest}"
+    _emit(
+        state,
+        {
+            "type": "timing_summary",
+            "status": status,
+            "total_seconds": round(total_seconds, 3),
+            "timings": timings,
+            "message": message,
+        },
+    )
+
+
+def _emit_parallel_initial_timings(
+    state: RunState,
+    chunk: dict[str, Any],
+) -> bool:
+    timings = chunk.get("parallel_initial_analyst_timings")
+    if not isinstance(timings, list) or not timings:
+        return False
+
+    total_seconds = chunk.get("parallel_initial_analysts_total_seconds")
+    total = float(total_seconds) if isinstance(total_seconds, (int, float)) else None
+    if total is not None:
+        _emit(
+            state,
+            {
+                "type": "parallel_initial_analysts_summary",
+                "total_seconds": round(total, 3),
+                "message": (f"Parallel Initial Analysts total: {_format_duration(total)}"),
+            },
+        )
+
+    for item in timings:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or item.get("key") or "Initial Analyst")
+        duration = float(item.get("duration_seconds") or 0.0)
+        tool_rounds = int(item.get("tool_rounds") or 0)
+        _emit(
+            state,
+            {
+                "type": "parallel_initial_analyst_timing",
+                "label": label,
+                "key": item.get("key"),
+                "report_key": item.get("report_key"),
+                "duration_seconds": round(duration, 3),
+                "tool_rounds": tool_rounds,
+                "message_count": int(item.get("message_count") or 0),
+                "message": (
+                    f"{label}: {_format_duration(duration)} "
+                    f"({tool_rounds} tool round{'s' if tool_rounds != 1 else ''})"
+                ),
+            },
+        )
+    return True
+
+
+def _emit_parallel_blind_timings(
+    state: RunState,
+    chunk: dict[str, Any],
+) -> bool:
+    timings = chunk.get("parallel_blind_researcher_timings")
+    if not isinstance(timings, list) or not timings:
+        return False
+
+    total_seconds = chunk.get("parallel_blind_researchers_total_seconds")
+    total = float(total_seconds) if isinstance(total_seconds, (int, float)) else None
+    if total is not None:
+        _emit(
+            state,
+            {
+                "type": "parallel_blind_researchers_summary",
+                "total_seconds": round(total, 3),
+                "message": (f"Parallel Blind Researchers total: {_format_duration(total)}"),
+            },
+        )
+
+    for item in timings:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or item.get("key") or "Blind Researcher")
+        duration = float(item.get("duration_seconds") or 0.0)
+        _emit(
+            state,
+            {
+                "type": "parallel_blind_researcher_timing",
+                "label": label,
+                "key": item.get("key"),
+                "duration_seconds": round(duration, 3),
+                "message": f"{label}: {_format_duration(duration)}",
+            },
+        )
+    return True
+
+
+def _emit_agent_model_diagnostics(
+    state: RunState,
+    chunk: dict[str, Any],
+    seen: set[str],
+) -> None:
+    diagnostic_fields = {
+        "evidence_ledger_builder_diagnostics": "Evidence Ledger Builder",
+        "bull_researcher_diagnostics": "Bull Researcher",
+        "bear_researcher_diagnostics": "Bear Researcher",
+        "research_manager_diagnostics": "Research Manager",
+        "falsification_auditor_diagnostics": "Falsification Auditor",
+        "trader_diagnostics": "Trader",
+        "aggressive_analyst_diagnostics": "Aggressive Analyst",
+        "conservative_analyst_diagnostics": "Conservative Analyst",
+        "neutral_analyst_diagnostics": "Neutral Analyst",
+        "portfolio_manager_diagnostics": "Portfolio Manager",
+    }
+    for field_name, default_label in diagnostic_fields.items():
+        payload = chunk.get(field_name)
+        if not isinstance(payload, dict):
+            continue
+        sequence = int(payload.get("sequence") or 1)
+        diagnostic_id = f"{field_name}:{sequence}"
+        if diagnostic_id in seen:
+            continue
+        seen.add(diagnostic_id)
+
+        label = str(payload.get("agent") or default_label)
+        input_sizes = payload.get("input_characters") or {}
+        prompt_characters = int(input_sizes.get("prompt") or 0)
+        attempts = int(payload.get("model_attempts") or 0)
+        total_duration = float(payload.get("total_model_duration_seconds") or 0.0)
+        fallback_used = bool(payload.get("fallback_used"))
+        message = (
+            f"{label}: input={prompt_characters:,} chars; "
+            f"app_attempts={attempts}; model_time={_format_duration(total_duration)}; "
+            f"fallback={'yes' if fallback_used else 'no'}"
+        )
+        structured_method = str(payload.get("structured_method") or "").strip()
+        if structured_method:
+            message += f"; method={structured_method}"
+        if sequence > 1:
+            message += f"; round={sequence}"
+        structured_duration = float(payload.get("structured_duration_seconds") or 0.0)
+        fallback_duration = float(payload.get("fallback_duration_seconds") or 0.0)
+        if payload.get("structured_attempts"):
+            message += f"; structured={_format_duration(structured_duration)}"
+        if payload.get("raw_response_available"):
+            message += f"; raw_content={int(payload.get('raw_content_characters') or 0):,} chars"
+        if fallback_used:
+            if payload.get("raw_output_reused"):
+                message += "; fallback=reused first response"
+            elif payload.get("fallback_attempts"):
+                message += f"; fallback_time={_format_duration(fallback_duration)}"
+            if payload.get("fallback_reason"):
+                message += f" ({payload['fallback_reason']})"
+            if payload.get("fallback_error"):
+                error = str(payload["fallback_error"]).strip()
+                message += f": {error[:200]}"
+        elif payload.get("model_error"):
+            error = str(payload["model_error"]).strip()
+            message += f"; error={error[:200]}"
+        if payload.get("correction_attempted"):
+            message += "; price_correction=yes"
+
+        _emit(
+            state,
+            {
+                "type": "agent_model_diagnostics",
+                "label": label,
+                **payload,
+                "message": message,
+            },
+        )
 
 
 def _redact_debug_value(value: Any) -> Any:
@@ -218,11 +463,99 @@ def _write_debug_log(state: RunState) -> None:
     path = Path("logs") / "web_runs" / f"{state.run_id}.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        json.dumps(_redact_debug_value(event), ensure_ascii=False)
-        for event in state.debug_events
+        json.dumps(_redact_debug_value(event), ensure_ascii=False) for event in state.debug_events
     ]
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
     state.debug_log_path = path
+
+
+def _read_debug_log_file(path: Path) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            events.append(_redact_debug_value(payload))
+    return events
+
+
+def _events_match_ticker(events: list[dict[str, Any]], ticker: str) -> bool:
+    key = ticker.strip().upper()
+    if not key:
+        return True
+    for event in events:
+        if str(event.get("ticker") or "").upper() == key:
+            return True
+        message = str(event.get("message") or "")
+        if key in message.upper():
+            return True
+    return False
+
+
+def read_run_debug_log(
+    run_id: str,
+    state: RunState | None = None,
+) -> dict[str, Any]:
+    """Read a run's debug events from memory or the persisted jsonl log."""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", run_id or ""):
+        raise ValueError("invalid run id")
+
+    if state is not None and state.debug_events:
+        return {
+            "run_id": run_id,
+            "available": True,
+            "events": [_redact_debug_value(event) for event in state.debug_events],
+            "source": "memory",
+        }
+
+    path = Path("logs") / "web_runs" / f"{run_id}.jsonl"
+    try:
+        resolved = path.resolve()
+        root = (Path("logs") / "web_runs").resolve()
+        if not str(resolved).startswith(str(root)):
+            raise ValueError("invalid run id")
+        events = _read_debug_log_file(path)
+    except FileNotFoundError:
+        return {"run_id": run_id, "available": False, "events": [], "source": None}
+
+    return {
+        "run_id": run_id,
+        "available": bool(events),
+        "events": events,
+        "source": "file",
+    }
+
+
+def read_latest_run_debug_log(ticker: str | None = None) -> dict[str, Any]:
+    """Return the newest persisted debug log, optionally matching a ticker."""
+    root = Path("logs") / "web_runs"
+    try:
+        files = sorted(
+            root.glob("*.jsonl"),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        files = []
+
+    for path in files[:50]:
+        try:
+            events = _read_debug_log_file(path)
+        except OSError:
+            continue
+        if not events or (ticker and not _events_match_ticker(events, ticker)):
+            continue
+        return {
+            "run_id": path.stem,
+            "available": True,
+            "events": events,
+            "source": "file",
+        }
+    return {"run_id": None, "available": False, "events": [], "source": None}
 
 
 def _message_side(kind: str, message) -> str:
@@ -255,17 +588,6 @@ def _detect_report_sections(chunk: dict[str, Any], seen: set[str]) -> list[tuple
             seen.add(key)
             found.append((key, label))
 
-    debate = chunk.get("investment_debate_state") or {}
-    if debate.get("bull_history") and "investment_bull" not in seen:
-        seen.add("investment_bull")
-        found.append(("investment_bull", "Bull Researcher"))
-    if debate.get("bear_history") and "investment_bear" not in seen:
-        seen.add("investment_bear")
-        found.append(("investment_bear", "Bear Researcher"))
-    if debate.get("judge_decision") and "research_manager" not in seen:
-        seen.add("research_manager")
-        found.append(("research_manager", "Research Manager"))
-
     if chunk.get("trader_investment_plan") and "trader" not in seen:
         seen.add("trader")
         found.append(("trader", "Trader"))
@@ -276,9 +598,27 @@ def _detect_report_sections(chunk: dict[str, Any], seen: set[str]) -> list[tuple
     if chunk.get("evidence_ledger") and "evidence_ledger" not in seen:
         seen.add("evidence_ledger")
         found.append(("evidence_ledger", "构建证据账本"))
-    if chunk.get("blind_bear_argument") and "blind_debate" not in seen:
-        seen.add("blind_debate")
-        found.append(("blind_debate", "Bull/Bear 独立盲评"))
+    if chunk.get("blind_bull_argument") and "blind_bull" not in seen:
+        seen.add("blind_bull")
+        found.append(("blind_bull", "Blind Bull"))
+    if chunk.get("blind_bear_argument") and "blind_bear" not in seen:
+        seen.add("blind_bear")
+        found.append(("blind_bear", "Blind Bear"))
+
+    debate = chunk.get("investment_debate_state") or {}
+    blind_bull = str(chunk.get("blind_bull_argument") or "").strip()
+    blind_bear = str(chunk.get("blind_bear_argument") or "").strip()
+    bull_history = str(debate.get("bull_history") or "").strip()
+    bear_history = str(debate.get("bear_history") or "").strip()
+    if bull_history and bull_history != blind_bull and "investment_bull" not in seen:
+        seen.add("investment_bull")
+        found.append(("investment_bull", "Bull Researcher"))
+    if bear_history and bear_history != blind_bear and "investment_bear" not in seen:
+        seen.add("investment_bear")
+        found.append(("investment_bear", "Bear Researcher"))
+    if debate.get("judge_decision") and "research_manager" not in seen:
+        seen.add("research_manager")
+        found.append(("research_manager", "Research Manager"))
 
     if chunk.get("falsification_audit") and "falsification_audit" not in seen:
         seen.add("falsification_audit")
@@ -316,6 +656,23 @@ def _detect_report_sections(chunk: dict[str, Any], seen: set[str]) -> list[tuple
 
 def run_analysis(state: RunState, params: RunParams) -> None:
     """在后台线程中执行图 stream，并向 event_queue 推送事件。"""
+    run_started = time.perf_counter()
+    last_timing_mark = run_started
+    timings: list[dict[str, Any]] = []
+
+    def emit_interval(label: str, category: str) -> None:
+        nonlocal last_timing_mark
+        now = time.perf_counter()
+        _emit_timing(
+            state,
+            timings,
+            label=label,
+            duration_seconds=now - last_timing_mark,
+            elapsed_seconds=now - run_started,
+            category=category,
+        )
+        last_timing_mark = now
+
     state.status = "running"
     _emit(state, {"type": "status", "message": f"Starting analysis for {params.ticker}..."})
 
@@ -327,6 +684,47 @@ def run_analysis(state: RunState, params: RunParams) -> None:
     try:
         config = build_run_config(params)
         state.config = config
+        _emit(
+            state,
+            {
+                "type": "run_config",
+                "parallel_initial_analysts": bool(config.get("parallel_initial_analysts", False)),
+                "parallel_initial_analyst_workers": int(
+                    config.get("parallel_initial_analyst_workers", 4)
+                ),
+                "parallel_blind_researchers": bool(config.get("parallel_blind_researchers", False)),
+                "falsification_structured_method": str(
+                    config.get(
+                        "falsification_structured_method",
+                        "provider_default",
+                    )
+                ),
+                "falsification_structured_method_effective": str(
+                    config.get(
+                        "falsification_structured_method_effective",
+                        "provider_default",
+                    )
+                ),
+                "analysts": analysts,
+                "analysis_mode": params.analysis_mode,
+                "mode": params.mode,
+                "provider": params.provider,
+                "quick_model": params.quick_model,
+                "deep_model": params.deep_model,
+                "message": (
+                    "parallel_initial_analysts="
+                    f"{bool(config.get('parallel_initial_analysts', False))}; "
+                    "workers="
+                    f"{int(config.get('parallel_initial_analyst_workers', 4))}; "
+                    "parallel_blind_researchers="
+                    f"{bool(config.get('parallel_blind_researchers', False))}; "
+                    "falsification_structured_method="
+                    f"{config.get('falsification_structured_method', 'provider_default')}"
+                    "->"
+                    f"{config.get('falsification_structured_method_effective', 'provider_default')}"
+                ),
+            },
+        )
         graph = FxxKStockGraph(selected_analysts=analysts, debug=False, config=config)
 
         prepared = graph.prepare_run(
@@ -353,15 +751,30 @@ def run_analysis(state: RunState, params: RunParams) -> None:
                 "analysis_count": int((prepared["snapshot"] or {}).get("analysis_count", 0)),
             },
         )
+        emit_interval("prepare_run and memory load", "setup")
 
         trace: list[dict[str, Any]] = []
         processed_ids: set[str] = set()
         content_signatures: set[tuple[str, str | None]] = set()
         seen_sections: set[str] = set()
+        seen_agent_diagnostics: set[str] = set()
+        parallel_initial_timings_emitted = False
+        parallel_blind_timings_emitted = False
 
         for chunk in graph.graph.stream(init_agent_state, **args):
             trace.append(chunk)
             sender = chunk.get("sender") or "Agent"
+
+            if not parallel_initial_timings_emitted:
+                parallel_initial_timings_emitted = _emit_parallel_initial_timings(
+                    state,
+                    chunk,
+                )
+
+            parallel_blind_chunk = False
+            if not parallel_blind_timings_emitted:
+                parallel_blind_chunk = _emit_parallel_blind_timings(state, chunk)
+                parallel_blind_timings_emitted = parallel_blind_chunk
 
             for section_key, label in _detect_report_sections(chunk, seen_sections):
                 _emit(
@@ -373,6 +786,17 @@ def run_analysis(state: RunState, params: RunParams) -> None:
                     },
                 )
                 _emit(state, {"type": "status", "message": f"{label} completed"})
+                if not (parallel_blind_chunk and section_key in {"blind_bull", "blind_bear"}):
+                    emit_interval(label, "stage")
+
+            if parallel_blind_chunk:
+                emit_interval("Parallel Blind Researchers", "stage")
+
+            _emit_agent_model_diagnostics(
+                state,
+                chunk,
+                seen_agent_diagnostics,
+            )
 
             for message in chunk.get("messages", []):
                 msg_id = getattr(message, "id", None)
@@ -447,6 +871,7 @@ def run_analysis(state: RunState, params: RunParams) -> None:
         report_file = write_report_tree(final_state, params.ticker, save_path)
         state.report_path = report_file.parent
         state.decision = graph.process_signal(final_state.get("final_trade_decision", ""))
+        emit_interval("write report files", "postprocess")
         _emit(state, {"type": "status", "message": "Generating core insights"})
         try:
             final_decision = final_state.get("final_trade_decision", "")
@@ -460,13 +885,21 @@ def run_analysis(state: RunState, params: RunParams) -> None:
             # The post-processing summary is supplementary. A provider failure
             # must not turn an otherwise complete analysis into a failed run.
             logger.warning("Core insight generation failed for %s: %s", params.ticker, exc)
+        emit_interval("core insights", "postprocess")
         graph.finalize_run(
             params.ticker,
             trade_date,
             final_state,
             log_state=False,
         )
+        emit_interval("finalize memory and calibration", "postprocess")
         state.status = "done"
+        _emit_timing_summary(
+            state,
+            timings,
+            total_seconds=time.perf_counter() - run_started,
+            status="done",
+        )
 
         _emit(
             state,
@@ -482,6 +915,12 @@ def run_analysis(state: RunState, params: RunParams) -> None:
         logger.exception("Web run failed for %s", params.ticker)
         state.status = "error"
         state.error = str(exc)
+        _emit_timing_summary(
+            state,
+            timings,
+            total_seconds=time.perf_counter() - run_started,
+            status="error",
+        )
         _emit(
             state,
             {

@@ -7,6 +7,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## [Unreleased]
+
+### Changed
+
+- **分析性能。** 四个基础分析师支持并行执行并默认启用，可在设置页关闭或调整
+  worker 数量；运行日志补充各阶段耗时、模型调用诊断和并行汇总，保留原始
+  串行路径作为回退基准。新增默认开启的 Blind Bull/Bear 并行执行，在不互相
+  暴露结论的前提下并发生成独立首评，并记录两条分支及整体墙钟耗时。
+- **工作台数据加载。** 拆分报告概览、行情和图表请求，并为历史报告建立可失效
+  的本地索引缓存，减少重复扫描报告目录和重复获取行情数据的开销。
+- **单阶段性能诊断。** 历史报告回放覆盖 Evidence Ledger、正式 Bull/Bear、
+  Falsification Auditor、Trader、三个风险分析师和 Portfolio Manager；新报告
+  保存各目标阶段调用前的精确状态切片与非内容模型诊断，旧报告仍可重建并明确
+  标记近似上下文。结构化审计回放支持显式选择 function calling、JSON mode
+  或 JSON schema，便于隔离模型网关兼容性，且不影响正式分析配置。
+
+### Fixed
+
+- **工作台初始化。** 移除已删除的历史版本按钮所遗留的事件绑定，避免初始化
+  脚本中断后出现历史分析为空、工具栏图标无法渲染的问题；新增测试校验所有
+  静态事件绑定均有对应的页面元素。
+- **证伪审计重复调用。** 当结构化输出未解析但首次响应已有正文或 tool
+  arguments 时，复用该响应作为不触发自动修订的咨询性审计，避免重复模型
+  调用；运行日志同时显示结构化与回退路径的独立耗时及脱敏错误摘要。正式
+  流程支持通过环境变量选择证伪阶段的结构化传输方式；项目默认沿用提供商
+  默认值，`auto` 会为原生 provider 选择对应 schema 协议、仅对已实测的
+  OpenCode DeepSeek 路由启用 JSON mode，未知兼容网关仍使用 provider 默认值。
+- **研究经理重复调用。** Research Manager 的结构化结果未解析但首次响应已有
+  可读正文时，复用该正文作为原有自由文本降级结果；空响应仍按原路径重试，
+  并在运行日志记录原始正文长度。
+- **中国市场行情降级。** 东方财富当天刷新失败时，可回退到仍处于既有新鲜度
+  阈值内的最近 OHLCV 缓存，并将其提升为当天缓存，避免并行工具重复请求；
+  并行分析错误会直接附带底层数据源原因。
+- **Web 启动地址。** 本地工作台默认监听 `127.0.0.1`，使 Uvicorn 启动提示
+  可以直接访问；容器或局域网场景仍可通过 `FXXKSTOCK_WEB_HOST` 覆盖。
+- **Chrome 前台干扰。** 自动化 Chrome 默认改为后台最小化启动，并在设置页
+  增加后台、完全无界面和正常显示三档模式；登录与验证码场景仍可临时切回
+  可见窗口。
+
 ## [0.4.0] — 2026-07-11
 
 Research-workbench release: a redesigned Web interface, actionable portfolio

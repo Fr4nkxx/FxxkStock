@@ -9,9 +9,9 @@ from fxxkstock.agents.managers.portfolio_manager import create_portfolio_manager
 from fxxkstock.agents.schemas import PortfolioDecision, PortfolioRating
 from fxxkstock.agents.utils.memory import TradingMemoryLog
 from fxxkstock.agents.utils.ticker_memory import TickerMemoryStore
+from fxxkstock.graph.fxxkstock_graph import FxxKStockGraph
 from fxxkstock.graph.propagation import Propagator
 from fxxkstock.graph.reflection import Reflector
-from fxxkstock.graph.fxxkstock_graph import FxxKStockGraph
 
 _SEP = TradingMemoryLog._SEPARATOR
 
@@ -777,6 +777,12 @@ class TestPortfolioManagerInjection:
         assert "**Data Confidence**: High" in md
         assert "**Thesis Confidence**: Medium" in md
         assert "**Execution Confidence**: High" in md
+        diagnostics = result["portfolio_manager_diagnostics"]
+        assert diagnostics["model_attempts"] == 1
+        assert diagnostics["structured_attempts"] == 1
+        assert diagnostics["fallback_used"] is False
+        assert diagnostics["correction_attempted"] is False
+        assert result["stage_replay_contexts"]["portfolio"]
 
     def test_pm_falls_back_to_freetext_when_structured_unavailable(self):
         """If a provider does not support with_structured_output, the agent
@@ -789,6 +795,11 @@ class TestPortfolioManagerInjection:
         pm_node = create_portfolio_manager(llm)
         result = pm_node(_make_pm_state())
         assert result["final_trade_decision"] == plain_response
+        diagnostics = result["portfolio_manager_diagnostics"]
+        assert diagnostics["structured_success"] is False
+        assert diagnostics["model_attempts"] == 1
+        assert diagnostics["fallback_used"] is True
+        assert diagnostics["fallback_reason"] == "structured_output_unavailable"
 
     # get_past_context ordering and limits
 

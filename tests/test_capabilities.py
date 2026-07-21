@@ -6,6 +6,7 @@ import pytest
 
 from fxxkstock.llm_clients.capabilities import (
     get_capabilities,
+    resolve_falsification_structured_method,
 )
 
 
@@ -122,3 +123,61 @@ def test_capabilities_dataclass_is_frozen():
     caps = get_capabilities("deepseek-chat")
     with pytest.raises(FrozenInstanceError):
         caps.supports_tool_choice = False  # type: ignore[misc]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("provider", "expected"),
+    [
+        ("openai", "json_schema"),
+        ("azure", "json_schema"),
+        ("google", "json_schema"),
+        ("anthropic", "json_schema"),
+        ("deepseek", "json_mode"),
+        ("bedrock", None),
+    ],
+)
+def test_auto_falsification_method_uses_provider_native_transport(
+    provider,
+    expected,
+):
+    assert resolve_falsification_structured_method(
+        requested="auto",
+        provider=provider,
+        model="deepseek-v4-pro",
+    ) == expected
+
+
+@pytest.mark.unit
+def test_auto_falsification_method_is_scoped_to_benchmarked_opencode_route():
+    assert resolve_falsification_structured_method(
+        requested="auto",
+        provider="openai_compatible",
+        model="deepseek-v4-pro",
+        backend_url="https://opencode.ai/zen/go/v1",
+    ) == "json_mode"
+    assert resolve_falsification_structured_method(
+        requested="auto",
+        provider="openai_compatible",
+        model="deepseek-v4-pro",
+        backend_url="https://gateway.example/v1",
+    ) is None
+
+
+@pytest.mark.unit
+def test_explicit_falsification_method_remains_available():
+    assert resolve_falsification_structured_method(
+        requested="function_calling",
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+    ) == "function_calling"
+
+
+@pytest.mark.unit
+def test_unknown_falsification_method_is_rejected():
+    with pytest.raises(ValueError, match="falsification_structured_method"):
+        resolve_falsification_structured_method(
+            requested="magic",
+            provider="openai",
+            model="gpt-5.5",
+        )

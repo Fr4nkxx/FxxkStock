@@ -162,4 +162,7 @@ def test_imports_latest_nested_report(tmp_path):
 
     assert snapshot["last_analysis_date"] == "2026-06-28"
     assert snapshot["reports"]["fundamentals_report"] == "nested fundamentals"
-    assert snapshot["imported_from"].endswith("600353.SS/20260628_091530")
+    assert Path(snapshot["imported_from"]).parts[-2:] == (
+        "600353.SS",
+        "20260628_091530",
+    )

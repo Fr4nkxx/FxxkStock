@@ -96,7 +96,7 @@ def test_scale_price_for_display():
 def test_get_instrument_fx_context_cny():
     with patch(
         "fxxkstock.dataflows.currency_utils._quick_identity_for_currency",
-        return_value={"currency": "CNY"},
+        side_effect=AssertionError("A-share CNY detection should not call yfinance"),
     ):
         ccy, rate = get_instrument_fx_context("600519.SS", "2026-06-26")
     assert ccy == "CNY"

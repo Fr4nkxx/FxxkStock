@@ -11,15 +11,22 @@ back gracefully to free-text generation.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date
+
+from langchain_core.output_parsers import PydanticOutputParser
 
 from fxxkstock.agents.schemas import PortfolioDecision, render_pm_decision
 from fxxkstock.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_report_instructions,
 )
-from fxxkstock.agents.utils.structured import bind_structured
+from fxxkstock.agents.utils.diagnostics import (
+    append_stage_replay_context,
+    prompt_characters,
+)
 from fxxkstock.agents.utils.position import render_position_context
+from fxxkstock.agents.utils.structured import bind_structured, summarize_diagnostic_error
 from fxxkstock.dataflows.market_data_validator import (
     find_current_price_conflicts,
     render_current_market_context,
@@ -28,21 +35,113 @@ from fxxkstock.dataflows.market_data_validator import (
 logger = logging.getLogger(__name__)
 
 
-def create_portfolio_manager(llm):
-    structured_llm = bind_structured(llm, PortfolioDecision, "Portfolio Manager")
+def create_portfolio_manager(
+    llm,
+    *,
+    structured_method: str | None = None,
+):
+    structured_llm = bind_structured(
+        llm,
+        PortfolioDecision,
+        "Portfolio Manager",
+        method=structured_method,
+    )
+    json_mode_instruction = ""
+    if structured_method == "json_mode":
+        parser = PydanticOutputParser(pydantic_object=PortfolioDecision)
+        json_mode_instruction = (
+            "\n\nReturn exactly one JSON object matching this schema. Do not "
+            "wrap it in a markdown code fence.\n"
+            f"{parser.get_format_instructions()}"
+        )
 
     def portfolio_manager_node(state) -> dict:
+        diagnostics = {
+            "agent": "Portfolio Manager",
+            "sequence": 1,
+            "input_characters": {"prompt": 0, "total_prompt": 0},
+            "structured_available": structured_llm is not None,
+            "structured_method": structured_method or "provider_default",
+            "structured_attempts": 0,
+            "fallback_attempts": 0,
+            "fallback_used": False,
+            "attempts": [],
+        }
+        model_duration = 0.0
+
         def invoke(prompt_value, name):
+            nonlocal model_duration
+            input_size = prompt_characters(prompt_value)
+            if not diagnostics["input_characters"]["prompt"]:
+                diagnostics["input_characters"]["prompt"] = input_size
+            diagnostics["input_characters"]["total_prompt"] += input_size
             if structured_llm is not None:
+                diagnostics["structured_attempts"] += 1
+                started_at = time.perf_counter()
                 try:
                     result = structured_llm.invoke(prompt_value)
                     if result is None:
                         raise ValueError("structured output returned no result")
-                    return render_pm_decision(result), result.model_dump(mode="json")
+                    output = render_pm_decision(result)
+                    elapsed = time.perf_counter() - started_at
+                    model_duration += elapsed
+                    diagnostics["attempts"].append(
+                        {
+                            "label": name,
+                            "transport": "structured",
+                            "input_characters": input_size,
+                            "output_characters": len(output),
+                            "duration_seconds": round(elapsed, 3),
+                            "success": True,
+                        }
+                    )
+                    return output, result.model_dump(mode="json")
                 except Exception as exc:
+                    elapsed = time.perf_counter() - started_at
+                    model_duration += elapsed
+                    error = summarize_diagnostic_error(exc)
+                    diagnostics.update(
+                        {
+                            "fallback_used": True,
+                            "fallback_reason": type(exc).__name__,
+                            "fallback_error": error,
+                        }
+                    )
+                    diagnostics["attempts"].append(
+                        {
+                            "label": name,
+                            "transport": "structured",
+                            "input_characters": input_size,
+                            "output_characters": 0,
+                            "duration_seconds": round(elapsed, 3),
+                            "success": False,
+                            "error": error,
+                        }
+                    )
                     logger.warning("%s structured output failed: %s", name, exc)
+            else:
+                diagnostics.setdefault(
+                    "fallback_reason",
+                    "structured_output_unavailable",
+                )
+            diagnostics["fallback_attempts"] += 1
+            diagnostics["fallback_used"] = True
+            started_at = time.perf_counter()
             response = llm.invoke(prompt_value)
-            return str(getattr(response, "content", response)), {}
+            output = str(getattr(response, "content", response))
+            elapsed = time.perf_counter() - started_at
+            model_duration += elapsed
+            diagnostics["attempts"].append(
+                {
+                    "label": name,
+                    "transport": "free_text",
+                    "input_characters": input_size,
+                    "output_characters": len(output),
+                    "duration_seconds": round(elapsed, 3),
+                    "success": True,
+                }
+            )
+            return output, {}
 
         instrument_context = get_instrument_context_from_state(state)
 
@@ -51,12 +150,8 @@ def create_portfolio_manager(llm):
         research_plan = state["investment_plan"]
         trader_plan = state["trader_investment_plan"]
         position_context = render_position_context(state.get("position_context"))
-        researchability = (state.get("researchability_assessment") or {}).get(
-            "markdown", ""
-        )
-        falsification_audit = (state.get("falsification_audit") or {}).get(
-            "markdown", ""
-        )
+        researchability = (state.get("researchability_assessment") or {}).get("markdown", "")
+        falsification_audit = (state.get("falsification_audit") or {}).get("markdown", "")
         analysis_date = str(state.get("trade_date") or date.today().isoformat())
 
         past_context = state.get("past_context", "")
@@ -131,11 +226,12 @@ Use cost basis only for risk management; never anchor the decision on breaking e
 Never describe a market low, technical level, prior-report price, or proposed entry
 as the user's cost basis. If you mention the user's cost or P/L, copy only the exact
 values in Account Position Context and label them explicitly.
-Do not output a specific trade quantity or target portfolio percentage.{get_report_instructions()}"""
+Do not output a specific trade quantity or target portfolio percentage.{get_report_instructions()}{json_mode_instruction}"""
 
         final_trade_decision, decision_metadata = invoke(prompt, "Portfolio Manager")
         snapshot = state.get("current_market_snapshot") or {}
         conflicts = find_current_price_conflicts(final_trade_decision, snapshot)
+        diagnostics["correction_attempted"] = bool(conflicts)
         if conflicts:
             correction = (
                 f"{prompt}\n\n"
@@ -155,6 +251,35 @@ Do not output a specific trade quantity or target portfolio percentage.{get_repo
                     f"{remaining} conflict with verified close {snapshot.get('close')}"
                 )
 
+        diagnostics.update(
+            {
+                "structured_success": not any(
+                    attempt["transport"] == "structured" and not attempt["success"]
+                    for attempt in diagnostics["attempts"]
+                )
+                and bool(diagnostics["structured_attempts"]),
+                "structured_duration_seconds": round(
+                    sum(
+                        attempt["duration_seconds"]
+                        for attempt in diagnostics["attempts"]
+                        if attempt["transport"] == "structured"
+                    ),
+                    3,
+                ),
+                "fallback_duration_seconds": round(
+                    sum(
+                        attempt["duration_seconds"]
+                        for attempt in diagnostics["attempts"]
+                        if attempt["transport"] == "free_text"
+                    ),
+                    3,
+                ),
+                "model_attempts": len(diagnostics["attempts"]),
+                "output_characters": len(final_trade_decision),
+                "total_model_duration_seconds": round(model_duration, 3),
+            }
+        )
+
         new_risk_debate_state = {
             "judge_decision": final_trade_decision,
             "history": risk_debate_state["history"],
@@ -172,6 +297,12 @@ Do not output a specific trade quantity or target portfolio percentage.{get_repo
             "risk_debate_state": new_risk_debate_state,
             "final_trade_decision": final_trade_decision,
             "portfolio_decision_metadata": decision_metadata,
+            "portfolio_manager_diagnostics": diagnostics,
+            "stage_replay_contexts": append_stage_replay_context(
+                state,
+                "portfolio",
+                {"risk_debate_state": risk_debate_state},
+            ),
         }
 
     return portfolio_manager_node
